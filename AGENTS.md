@@ -22,7 +22,7 @@ Guide for humans and coding agents in this repository.
 ## Quick setup
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .[dev]
 cp config.example.toml config.toml
@@ -31,7 +31,7 @@ cp config.example.toml config.toml
 ## Standard commands
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/quiz-relay config-check --config config.toml
 .venv/bin/quiz-relay list-monitors --config config.toml
 .venv/bin/quiz-relay test-screenshot --config config.toml
@@ -54,14 +54,14 @@ cd /home/dahav/Privat/dev/quiz-relay
 Before finishing changes, at minimum run:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/python -m pytest
 ```
 
 For focused changes, at least run the affected tests, for example:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/python -m pytest tests/test_mouse_listener.py
 ```
 

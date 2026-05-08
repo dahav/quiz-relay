@@ -26,7 +26,7 @@ Trigger -> Screenshot -> AI analysis -> JSON solution -> optional ESP32 POST
 ## Quickstart
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .[dev]
 cp config.example.toml config.toml
@@ -37,7 +37,7 @@ Optional: set API keys in `.env` (or your shell), for example `OPENAI_API_KEY` o
 Initial checks:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/quiz-relay config-check --config config.toml
 .venv/bin/quiz-relay list-monitors --config config.toml
 .venv/bin/quiz-relay test-screenshot --config config.toml
@@ -102,7 +102,7 @@ quiz-relay test-esp --source test
 Use the venv binary directly or activate the venv:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 source .venv/bin/activate
 quiz-relay config-check
 ```
@@ -110,14 +110,14 @@ quiz-relay config-check
 Or directly:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/quiz-relay config-check
 ```
 
 ### `list-monitors` reports missing `mss`
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/python -m pip install -e .[dev]
 ```
 
@@ -139,14 +139,14 @@ Default paths (configurable in `config.toml`):
 Run all tests:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/python -m pytest
 ```
 
 Run a single test:
 
 ```bash
-cd /home/dahav/Privat/dev/quiz-relay
+cd /path/to/quiz-relay
 .venv/bin/python -m pytest tests/test_mouse_listener.py
 ```
 
