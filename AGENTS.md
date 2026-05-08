@@ -23,8 +23,7 @@ Guide for humans and coding agents in this repository.
 
 ```bash
 cd /path/to/quiz-relay
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .[dev]
+make setup
 cp config.example.toml config.toml
 ```
 
@@ -32,10 +31,12 @@ cp config.example.toml config.toml
 
 ```bash
 cd /path/to/quiz-relay
-.venv/bin/quiz-relay config-check --config config.toml
-.venv/bin/quiz-relay list-monitors --config config.toml
-.venv/bin/quiz-relay test-screenshot --config config.toml
-.venv/bin/quiz-relay solve --config config.toml --source cli
+make setup
+.venv/bin/quiz-relay --config config.toml config-check
+.venv/bin/quiz-relay --config config.toml list-monitors
+.venv/bin/quiz-relay --config config.toml test-screenshot
+.venv/bin/quiz-relay --config config.toml solve --source cli
+make clean
 .venv/bin/python -m pytest
 ```
 
@@ -91,7 +92,7 @@ or
 ### `list-monitors` fails because of missing `mss`
 
 ```bash
-.venv/bin/python -m pip install -e .[dev]
+.venv/bin/python -m pip install -e '.[dev]'
 ```
 
 ### `listen-mouse --scan` does not react

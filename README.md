@@ -21,14 +21,14 @@ Trigger -> Screenshot -> AI analysis -> JSON solution -> optional ESP32 POST
 
 - Linux desktop session for screenshot features
 - Python 3.11+
+- `make`
 - For global mouse events (`listen-mouse`): currently X11/Xorg only (Wayland exits with a clear error message)
 
 ## Quickstart
 
 ```bash
 cd /path/to/quiz-relay
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .[dev]
+make setup
 cp config.example.toml config.toml
 ```
 
@@ -38,9 +38,9 @@ Initial checks:
 
 ```bash
 cd /path/to/quiz-relay
-.venv/bin/quiz-relay config-check --config config.toml
-.venv/bin/quiz-relay list-monitors --config config.toml
-.venv/bin/quiz-relay test-screenshot --config config.toml
+.venv/bin/quiz-relay --config config.toml config-check
+.venv/bin/quiz-relay --config config.toml list-monitors
+.venv/bin/quiz-relay --config config.toml test-screenshot
 ```
 
 ## Configuration
@@ -118,7 +118,7 @@ cd /path/to/quiz-relay
 
 ```bash
 cd /path/to/quiz-relay
-.venv/bin/python -m pip install -e .[dev]
+.venv/bin/python -m pip install -e '.[dev]'
 ```
 
 ### `listen-mouse --scan` does not react / exits with TriggerError
@@ -135,6 +135,22 @@ Default paths (configurable in `config.toml`):
 - Error logs: `runtime/logs/errors.log`
 
 ## Development
+
+Create or refresh the local virtual environment:
+
+```bash
+cd /path/to/quiz-relay
+make setup
+```
+
+Remove generated artifacts:
+
+```bash
+cd /path/to/quiz-relay
+make clean
+```
+
+`make clean` removes Python cache files, test/build artifacts, egg-info directories, coverage output, and `runtime/`.
 
 Run all tests:
 
