@@ -2,20 +2,45 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 from quiz_relay.ai import parse_ai_response, validate_solution
 from quiz_relay.capture import capture_screenshot, list_monitors
-from quiz_relay.config import load_settings
+from quiz_relay.config import Settings, load_settings
 from quiz_relay.errors import ConfigurationError, QuizRelayError
 from quiz_relay.models import AiRawResponse, AiSolution, QuestionAnswer, RunContext, RunResult
 from quiz_relay.mouse import SUPPORTED_EVENTS, MouseEvent, listen_for_mouse_event
 from quiz_relay.relay import send_solution
 from quiz_relay.runner import run_once
 
+EXIT_CODE_BY_STATUS = {
+    "success": 0,
+    "partial": 6,
+    "locked": 7,
+}
+
+EXIT_CODE_BY_ERROR_STAGE = {
+    "configuration": 2,
+    "screenshot": 3,
+    "ai_request": 4,
+    "ai_parse": 5,
+    "solution_validation": 5,
+    "http_relay_send": 6,
+}
+
 
 def _print_json(data: dict) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _solution_to_stdout(solution: AiSolution) -> dict[str, object]:
+    return {
+        "explanation": solution.explanation,
+        "answers": solution.answer_dicts(),
+        "confidence": solution.confidence,
+    }
 
 
 def _result_to_stdout(result: RunResult) -> dict:
@@ -24,40 +49,21 @@ def _result_to_stdout(result: RunResult) -> dict:
         "task_id": result.context.task_id,
     }
     if result.solution:
-        data["answers"] = [
-            {"question": item.question, "answers": item.answers}
-            for item in result.solution.answers
-        ]
+        data["answers"] = result.solution.answer_dicts()
         data["confidence"] = result.solution.confidence
     if result.relay_result:
         data["relay_sent"] = result.relay_result.sent
         data["relay_error"] = result.relay_result.error
     if result.error:
-        data["error"] = {
-            "stage": result.error.stage,
-            "type": result.error.error_type,
-            "message": result.error.message,
-        }
+        data["error"] = result.error.as_dict()
     return data
 
 
 def _exit_code(result: RunResult) -> int:
-    if result.status == "success":
-        return 0
-    if result.status == "partial":
-        return 6
-    if result.status == "locked":
-        return 7
-    if result.error and result.error.stage == "configuration":
-        return 2
-    if result.error and result.error.stage == "screenshot":
-        return 3
-    if result.error and result.error.stage == "ai_request":
-        return 4
-    if result.error and result.error.stage in {"ai_parse", "solution_validation"}:
-        return 5
-    if result.error and result.error.stage == "http_relay_send":
-        return 6
+    if result.status in EXIT_CODE_BY_STATUS:
+        return EXIT_CODE_BY_STATUS[result.status]
+    if result.error and result.error.stage in EXIT_CODE_BY_ERROR_STAGE:
+        return EXIT_CODE_BY_ERROR_STAGE[result.error.stage]
     return 1
 
 
@@ -92,11 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _settings_from_args(args: argparse.Namespace):
+def _settings_from_args(args: argparse.Namespace) -> Settings:
     settings = load_settings(args.config, args.profile)
     if getattr(args, "no_relay", False):
-        from dataclasses import replace
-
         settings = replace(settings, http_relay=replace(settings.http_relay, enabled=False))
     return settings
 
@@ -120,7 +124,7 @@ def cmd_test_screenshot(args: argparse.Namespace) -> int:
 def cmd_list_monitors(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     monitors = list_monitors(settings)
-    _print_json({"status": "success", "monitors": [monitor.__dict__ for monitor in monitors]})
+    _print_json({"status": "success", "monitors": [monitor.as_dict() for monitor in monitors]})
     return 0
 
 
@@ -144,7 +148,7 @@ def cmd_test_relay(args: argparse.Namespace) -> int:
     result = send_solution(
         settings.http_relay,
         context,
-        AiSolution(explanation="Testpayload", answers=[QuestionAnswer(question=1, answers=["A"])]),
+        AiSolution(explanation="Test payload", answers=[QuestionAnswer(question=1, answers=["A"])]),
     )
     _print_json(
         {
@@ -169,7 +173,7 @@ def cmd_listen_mouse(args: argparse.Namespace) -> int:
 
     if args.scan:
         print("Scanning mouse events. Stop with Ctrl+C.", flush=True)
-        listen_for_mouse_event(event_name="middle-click", callback=lambda _event: None, scan=True)
+        listen_for_mouse_event(event_name="middle-click", callback=_ignore_scanned_mouse_event, scan=True)
         return 0
 
     def run_pipeline(event: MouseEvent) -> None:
@@ -184,14 +188,7 @@ def cmd_listen_mouse(args: argparse.Namespace) -> int:
 def cmd_parse_response(args: argparse.Namespace) -> int:
     text = args.file.read_text(encoding="utf-8")
     solution = validate_solution(parse_ai_response(AiRawResponse(text, "file", "file")))
-    _print_json(
-        {
-            "status": "success",
-            "explanation": solution.explanation,
-            "answers": [{"question": item.question, "answers": item.answers} for item in solution.answers],
-            "confidence": solution.confidence,
-        }
-    )
+    _print_json({"status": "success", **_solution_to_stdout(solution)})
     return 0
 
 
@@ -209,10 +206,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    commands = {
+def _ignore_scanned_mouse_event(_event: MouseEvent) -> None:
+    return None
+
+
+def _command_handlers() -> dict[str, Callable[[argparse.Namespace], int]]:
+    return {
         "solve": cmd_solve,
         "test-screenshot": cmd_test_screenshot,
         "list-monitors": cmd_list_monitors,
@@ -222,13 +221,29 @@ def main(argv: list[str] | None = None) -> int:
         "parse-response": cmd_parse_response,
         "doctor": cmd_doctor,
     }
+
+
+def _error_to_stdout(exc: QuizRelayError) -> dict[str, object]:
+    return {
+        "status": "failed",
+        "error": {
+            "stage": exc.stage,
+            "type": exc.__class__.__name__,
+            "message": str(exc),
+        },
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     try:
-        return commands[args.command](args)
+        return _command_handlers()[args.command](args)
     except ConfigurationError as exc:
-        _print_json({"status": "failed", "error": {"stage": exc.stage, "type": exc.__class__.__name__, "message": str(exc)}})
+        _print_json(_error_to_stdout(exc))
         return exc.exit_code
     except QuizRelayError as exc:
-        _print_json({"status": "failed", "error": {"stage": exc.stage, "type": exc.__class__.__name__, "message": str(exc)}})
+        _print_json(_error_to_stdout(exc))
         return exc.exit_code
 
 

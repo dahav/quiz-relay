@@ -10,8 +10,11 @@ from quiz_relay.config import AiConfig
 from quiz_relay.errors import AiRequestError, AiResponseParseError, SolutionValidationError
 from quiz_relay.models import AiRawResponse, AiSolution, QuestionAnswer, ScreenshotResult
 
+FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.IGNORECASE)
+
 
 def analyze_image(image: ScreenshotResult, config: AiConfig, base_dir: Path = Path(".")) -> AiRawResponse:
+    """Send a screenshot to the configured AI provider and return the raw text response."""
     prompt = build_prompt(config, base_dir=base_dir)
     provider = config.provider.lower()
     if provider in {"openai", "chatgpt"}:
@@ -24,7 +27,16 @@ def analyze_image(image: ScreenshotResult, config: AiConfig, base_dir: Path = Pa
 
 
 def build_prompt(config: AiConfig, base_dir: Path = Path(".")) -> str:
-    prompt = f"""Analyze the provided image.
+    """Build the prompt from the default instructions and an optional prompt file."""
+    prompt = _base_prompt(config.response_language)
+    extra = read_prompt_file(config, base_dir=base_dir)
+    if extra:
+        prompt = f"{prompt}\nAdditional instructions:\n{extra}\n"
+    return prompt
+
+
+def _base_prompt(response_language: str) -> str:
+    return f"""Analyze the provided image.
 Look for one or more multiple-choice questions.
 
 Return only valid JSON in this schema:
@@ -38,20 +50,17 @@ Return only valid JSON in this schema:
 }}
 
 Rules:
-- Write the explanation in this language: {config.response_language}.
+- Write the explanation in this language: {response_language}.
 - Use uppercase option letters such as A, B, C, D.
 - If multiple options are correct, include all letters in the array.
 - If multiple questions are visible, include one object per question.
 - If no multiple-choice question is visible, return an empty answers array and explain why.
 - Do not return Markdown code fences.
 """
-    extra = read_prompt_file(config, base_dir=base_dir)
-    if extra:
-        prompt = f"{prompt}\nAdditional instructions:\n{extra}\n"
-    return prompt
 
 
 def read_prompt_file(config: AiConfig, base_dir: Path = Path(".")) -> str:
+    """Return additional prompt instructions, or an empty string when no file is configured."""
     if config.prompt_file is None:
         return ""
     prompt_path = config.prompt_file
@@ -63,6 +72,7 @@ def read_prompt_file(config: AiConfig, base_dir: Path = Path(".")) -> str:
 
 
 def analyze_with_openai(image: ScreenshotResult, prompt: str, config: AiConfig) -> str:
+    """Run the OpenAI image analysis request and return plain response text."""
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -93,6 +103,7 @@ def analyze_with_openai(image: ScreenshotResult, prompt: str, config: AiConfig) 
 
 
 def analyze_with_anthropic(image: ScreenshotResult, prompt: str, config: AiConfig) -> str:
+    """Run the Anthropic image analysis request and return plain response text."""
     try:
         import anthropic
     except ImportError as exc:
@@ -121,19 +132,29 @@ def analyze_with_anthropic(image: ScreenshotResult, prompt: str, config: AiConfi
                 }
             ],
         )
-        return "\n".join(block.text for block in message.content if getattr(block, "type", None) == "text").strip()
+        return _anthropic_text(message)
     except Exception as exc:
         raise AiRequestError(f"Anthropic request failed: {exc}") from exc
 
 
 def parse_ai_response(raw: AiRawResponse) -> AiSolution:
+    """Parse the provider response into the internal solution model."""
     payload = _extract_json(raw.text)
+    data = _load_response_object(payload)
+    return _solution_from_response(data, raw.text)
+
+
+def _load_response_object(payload: str) -> dict[str, Any]:
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise AiResponseParseError(f"AI response does not contain valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise AiResponseParseError("AI response must be a JSON object.")
+    return data
+
+
+def _solution_from_response(data: dict[str, Any], raw_text: str) -> AiSolution:
     answers = data.get("answers")
     if not isinstance(answers, list):
         raise AiResponseParseError("Field 'answers' is missing or is not an array.")
@@ -148,34 +169,15 @@ def parse_ai_response(raw: AiRawResponse) -> AiSolution:
         explanation=explanation,
         answers=parsed_answers,
         confidence=float(confidence) if confidence is not None else None,
-        raw_response=raw.text,
+        raw_response=raw_text,
     )
 
 
 def validate_solution(solution: AiSolution, allowed_answers: set[str] | None = None) -> AiSolution:
+    """Normalize answer letters and reject structurally invalid solutions."""
     allowed = allowed_answers or set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    if solution.confidence is not None and not 0 <= solution.confidence <= 1:
-        raise SolutionValidationError("confidence must be between 0 and 1.")
-
-    normalized: list[QuestionAnswer] = []
-    for item in solution.answers:
-        if item.question < 1:
-            raise SolutionValidationError("question must be greater than or equal to 1.")
-        answers = []
-        seen = set()
-        for answer in item.answers:
-            value = answer.strip().upper()
-            if not value:
-                continue
-            if value not in allowed:
-                raise SolutionValidationError(f"Invalid answer option: {answer}")
-            if value not in seen:
-                answers.append(value)
-                seen.add(value)
-        if not answers:
-            raise SolutionValidationError("answers must not be empty for a visible question.")
-        normalized.append(QuestionAnswer(question=item.question, answers=answers))
-
+    _validate_confidence(solution.confidence)
+    normalized = [_normalize_question_answer(item, allowed) for item in solution.answers]
     return AiSolution(
         explanation=solution.explanation,
         answers=normalized,
@@ -186,6 +188,15 @@ def validate_solution(solution: AiSolution, allowed_answers: set[str] | None = N
 
 def _base64_image(image: ScreenshotResult) -> str:
     return base64.b64encode(Path(image.path).read_bytes()).decode("ascii")
+
+
+def _anthropic_text(message: Any) -> str:
+    text_blocks = [
+        block.text
+        for block in message.content
+        if getattr(block, "type", None) == "text"
+    ]
+    return "\n".join(text_blocks).strip()
 
 
 def _parse_answer(item: Any) -> QuestionAnswer:
@@ -202,7 +213,7 @@ def _parse_answer(item: Any) -> QuestionAnswer:
 
 def _extract_json(text: str) -> str:
     stripped = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
+    fence = FENCED_JSON_RE.search(stripped)
     if fence:
         return fence.group(1).strip()
     start = stripped.find("{")
@@ -210,3 +221,32 @@ def _extract_json(text: str) -> str:
     if start == -1 or end == -1 or end < start:
         raise AiResponseParseError("AI response does not contain a JSON object.")
     return stripped[start : end + 1]
+
+
+def _validate_confidence(confidence: float | None) -> None:
+    if confidence is not None and not 0 <= confidence <= 1:
+        raise SolutionValidationError("confidence must be between 0 and 1.")
+
+
+def _normalize_question_answer(item: QuestionAnswer, allowed_answers: set[str]) -> QuestionAnswer:
+    if item.question < 1:
+        raise SolutionValidationError("question must be greater than or equal to 1.")
+    answers = _normalize_answer_letters(item.answers, allowed_answers)
+    if not answers:
+        raise SolutionValidationError("answers must not be empty for a visible question.")
+    return QuestionAnswer(question=item.question, answers=answers)
+
+
+def _normalize_answer_letters(answers: list[str], allowed_answers: set[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for answer in answers:
+        value = answer.strip().upper()
+        if not value:
+            continue
+        if value not in allowed_answers:
+            raise SolutionValidationError(f"Invalid answer option: {answer}")
+        if value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized

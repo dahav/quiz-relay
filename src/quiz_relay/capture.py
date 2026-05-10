@@ -11,23 +11,25 @@ from quiz_relay.models import MonitorInfo, RunContext, ScreenshotResult
 
 
 def screenshot_path(settings: Settings, context: RunContext) -> Path:
+    """Return the runtime path used for a captured screenshot."""
     screenshots_dir = settings.app.runtime_directory / "screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
     return screenshots_dir / f"{context.task_id}.png"
 
 
 def screenshot_from_file(path: Path) -> ScreenshotResult:
+    """Wrap an existing PNG or JPEG file as a screenshot result for test runs."""
     image_path = path.expanduser().resolve()
     if not image_path.is_file():
         raise ScreenshotCaptureError(f"Test image not found: {image_path}")
-    suffix = image_path.suffix.lower()
-    mime_type = "image/png" if suffix == ".png" else "image/jpeg" if suffix in {".jpg", ".jpeg"} else None
+    mime_type = _image_mime_type(image_path)
     if mime_type is None:
         raise ScreenshotCaptureError("Test image must be PNG or JPEG.")
     return ScreenshotResult(path=str(image_path), mime_type=mime_type, size_bytes=image_path.stat().st_size)
 
 
 def capture_screenshot(settings: Settings, context: RunContext) -> ScreenshotResult:
+    """Capture the configured monitor and save it under the runtime directory."""
     _ensure_desktop_context()
     if settings.screenshot.delay_ms > 0:
         time.sleep(settings.screenshot.delay_ms / 1000)
@@ -36,10 +38,8 @@ def capture_screenshot(settings: Settings, context: RunContext) -> ScreenshotRes
     output_path = screenshot_path(settings, context)
     try:
         with mss.MSS() as sct:
-            monitor_index = settings.screenshot.monitor
-            if monitor_index < 1 or monitor_index >= len(sct.monitors):
-                raise ScreenshotCaptureError(f"Monitor {monitor_index} is not available.")
-            screenshot = sct.grab(sct.monitors[monitor_index])
+            monitor = _selected_monitor(sct.monitors, settings.screenshot.monitor)
+            screenshot = sct.grab(monitor)
             mss.tools.to_png(screenshot.rgb, screenshot.size, output=str(output_path))
             return ScreenshotResult(
                 path=str(output_path),
@@ -54,6 +54,7 @@ def capture_screenshot(settings: Settings, context: RunContext) -> ScreenshotRes
 
 
 def list_monitors(settings: Settings) -> list[MonitorInfo]:
+    """Return monitor geometry reported by the screenshot backend."""
     _ensure_desktop_context()
     mss = _require_mss()
     try:
@@ -79,6 +80,21 @@ def _require_mss():
     except ImportError as exc:
         raise ScreenshotCaptureError("The Python package 'mss' is not installed.") from exc
     return mss
+
+
+def _image_mime_type(path: Path) -> str | None:
+    suffix = path.suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    return None
+
+
+def _selected_monitor(monitors: list[dict], monitor_index: int) -> dict:
+    if monitor_index < 1 or monitor_index >= len(monitors):
+        raise ScreenshotCaptureError(f"Monitor {monitor_index} is not available.")
+    return monitors[monitor_index]
 
 
 def _ensure_desktop_context() -> None:
