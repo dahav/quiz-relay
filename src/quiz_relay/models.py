@@ -79,12 +79,31 @@ class ScreenshotResult:
 
 
 @dataclass(frozen=True)
+class AnswerOption:
+    id: str
+    text: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"id": self.id, "text": self.text}
+
+
+@dataclass(frozen=True)
 class QuestionAnswer:
     question: int
     answers: list[str]
+    question_text: str | None = None
+    options: list[AnswerOption] | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {"question": self.question, "answers": self.answers}
+        data: dict[str, object] = {
+            "question": self.question,
+            "answers": self.answers,
+        }
+        if self.question_text is not None:
+            data["question_text"] = self.question_text
+        if self.options is not None:
+            data["options"] = [option.as_dict() for option in self.options]
+        return data
 
 
 @dataclass(frozen=True)

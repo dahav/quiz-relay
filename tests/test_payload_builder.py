@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from quiz_relay.config import HttpRelayConfig
-from quiz_relay.models import AiSolution, QuestionAnswer, RunContext
+from quiz_relay.models import AiSolution, AnswerOption, QuestionAnswer, RunContext
 from quiz_relay.relay import build_relay_payload
 
 
@@ -26,3 +26,28 @@ def test_payload_fields_are_configurable():
         solution,
     )
     assert payload == {"id": context.task_id, "answer": "A", "reason": "because"}
+
+
+def test_payload_includes_question_text_and_options():
+    context = RunContext.create("cli")
+    solution = AiSolution(
+        "because",
+        [
+            QuestionAnswer(
+                question=1,
+                answers=["2"],
+                question_text="What is 2 + 2?",
+                options=[AnswerOption("1", "3"), AnswerOption("2", "4")],
+            )
+        ],
+        0.9,
+    )
+    payload = build_relay_payload(HttpRelayConfig(), context, solution)
+    assert payload["answers"] == [
+        {
+            "question": 1,
+            "answers": ["2"],
+            "question_text": "What is 2 + 2?",
+            "options": [{"id": "1", "text": "3"}, {"id": "2", "text": "4"}],
+        }
+    ]

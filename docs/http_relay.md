@@ -18,7 +18,15 @@ Example JSON body:
   "task_id": "2026-05-07T16-33-21.912+0200-8f3a",
   "source": "shortcut",
   "answers": [
-    {"question": 1, "answers": ["A"]}
+    {
+      "question": 1,
+      "answers": ["A"],
+      "question_text": "Which option is correct?",
+      "options": [
+        {"id": "A", "text": "First option"},
+        {"id": "B", "text": "Second option"}
+      ]
+    }
   ],
   "confidence": 0.82,
   "created_at": "2026-05-07T16:33:26.381+02:00"
@@ -60,5 +68,8 @@ Supported expressions:
 - `solution.raw_response`
 - `meta.created_at`
 - `literal:<value>`
+
+`solution.answers` contains the selected answer identifiers in `answers`. It also
+includes `question_text` and all visible `options` when the AI provider returned them.
 
 HTTP 2xx is treated as success. HTTP 4xx is returned immediately. Timeouts and HTTP 5xx responses are retried according to `retries`.

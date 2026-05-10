@@ -26,7 +26,27 @@ class CaptureStub:
 
 
 def solve_stub(image, settings, base_dir):
-    return AiRawResponse('{"explanation":"ok","answers":[{"question":1,"answers":["a"]}],"confidence":0.8}', "test", "test")
+    return AiRawResponse(
+        """
+        {
+          "explanation": "ok",
+          "answers": [
+            {
+              "question": 1,
+              "question_text": "Choose the letter A.",
+              "options": [
+                {"id": "A", "text": "The letter A"},
+                {"id": "B", "text": "The letter B"}
+              ],
+              "answers": ["a"]
+            }
+          ],
+          "confidence": 0.8
+        }
+        """,
+        "test",
+        "test",
+    )
 
 
 def relay_stub(settings, context, solution):
@@ -63,6 +83,11 @@ def test_run_success(tmp_path: Path):
     assert not record["started_at"].endswith("Z")
     assert not record["finished_at"].endswith("Z")
     assert re.search(r"T\d{2}-\d{2}-\d{2}\.\d{3}[+-]\d{4}-[0-9a-f]{4}$", record["task_id"])
+    assert record["answers"][0]["question_text"] == "Choose the letter A."
+    assert record["answers"][0]["options"] == [
+        {"id": "A", "text": "The letter A"},
+        {"id": "B", "text": "The letter B"},
+    ]
 
 
 def test_run_test_image_skips_capture(tmp_path: Path):

@@ -8,9 +8,10 @@ from typing import Any
 
 from quiz_relay.config import AiConfig
 from quiz_relay.errors import AiRequestError, AiResponseParseError, SolutionValidationError
-from quiz_relay.models import AiRawResponse, AiSolution, QuestionAnswer, ScreenshotResult
+from quiz_relay.models import AiRawResponse, AiSolution, AnswerOption, QuestionAnswer, ScreenshotResult
 
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.IGNORECASE)
+DEFAULT_ANSWER_IDS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | {str(value) for value in range(1, 100)}
 
 
 def analyze_image(image: ScreenshotResult, config: AiConfig, base_dir: Path = Path(".")) -> AiRawResponse:
@@ -44,15 +45,29 @@ Return only valid JSON in this schema:
 {{
   "explanation": "Detailed reasoning for the answer.",
   "answers": [
-    {{"question": 1, "answers": ["A"]}}
+    {{
+      "question": 1,
+      "question_text": "Full question text exactly as visible.",
+      "options": [
+        {{"id": "A", "text": "First visible answer option"}},
+        {{"id": "B", "text": "Second visible answer option"}}
+      ],
+      "answers": ["A"]
+    }}
   ],
   "confidence": 0.0
 }}
 
 Rules:
 - Write the explanation in this language: {response_language}.
-- Use uppercase option letters such as A, B, C, D.
-- If multiple options are correct, include all letters in the array.
+- Include the full visible question text in question_text.
+- Include every visible answer option in options.
+- Use the visible option identifier as id, such as A, B, C or 1, 2, 3.
+- If an option has no visible identifier, assign A, B, C by reading order.
+- Use uppercase letters for letter identifiers.
+- Preserve answer option text as visible. Do not translate answer option text.
+- Put only the correct option identifiers in answers.
+- If multiple options are correct, include all correct identifiers in answers.
 - If multiple questions are visible, include one object per question.
 - If no multiple-choice question is visible, return an empty answers array and explain why.
 - Do not return Markdown code fences.
@@ -175,9 +190,8 @@ def _solution_from_response(data: dict[str, Any], raw_text: str) -> AiSolution:
 
 def validate_solution(solution: AiSolution, allowed_answers: set[str] | None = None) -> AiSolution:
     """Normalize answer letters and reject structurally invalid solutions."""
-    allowed = allowed_answers or set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     _validate_confidence(solution.confidence)
-    normalized = [_normalize_question_answer(item, allowed) for item in solution.answers]
+    normalized = [_normalize_question_answer(item, allowed_answers) for item in solution.answers]
     return AiSolution(
         explanation=solution.explanation,
         answers=normalized,
@@ -204,11 +218,40 @@ def _parse_answer(item: Any) -> QuestionAnswer:
         raise AiResponseParseError("An answers entry must be an object.")
     question = item.get("question")
     answers = item.get("answers")
+    question_text = item.get("question_text", item.get("text"))
+    options = item.get("options")
     if not isinstance(question, int):
         raise AiResponseParseError("question must be a number.")
     if not isinstance(answers, list) or not all(isinstance(value, str) for value in answers):
         raise AiResponseParseError("answers must be a string array.")
-    return QuestionAnswer(question=question, answers=list(answers))
+    if question_text is not None and not isinstance(question_text, str):
+        raise AiResponseParseError("question_text must be a string.")
+    return QuestionAnswer(
+        question=question,
+        answers=list(answers),
+        question_text=question_text,
+        options=_parse_options(options),
+    )
+
+
+def _parse_options(value: Any) -> list[AnswerOption] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise AiResponseParseError("options must be an object array.")
+    return [_parse_option(item) for item in value]
+
+
+def _parse_option(item: Any) -> AnswerOption:
+    if not isinstance(item, dict):
+        raise AiResponseParseError("An options entry must be an object.")
+    option_id = item.get("id")
+    text = item.get("text")
+    if not isinstance(option_id, str):
+        raise AiResponseParseError("option id must be a string.")
+    if not isinstance(text, str):
+        raise AiResponseParseError("option text must be a string.")
+    return AnswerOption(id=option_id, text=text)
 
 
 def _extract_json(text: str) -> str:
@@ -228,20 +271,54 @@ def _validate_confidence(confidence: float | None) -> None:
         raise SolutionValidationError("confidence must be between 0 and 1.")
 
 
-def _normalize_question_answer(item: QuestionAnswer, allowed_answers: set[str]) -> QuestionAnswer:
+def _normalize_question_answer(item: QuestionAnswer, allowed_answers: set[str] | None) -> QuestionAnswer:
     if item.question < 1:
         raise SolutionValidationError("question must be greater than or equal to 1.")
-    answers = _normalize_answer_letters(item.answers, allowed_answers)
+    options = _normalize_options(item.options)
+    allowed = _allowed_answer_ids(options, allowed_answers)
+    answers = _normalize_answer_ids(item.answers, allowed)
     if not answers:
         raise SolutionValidationError("answers must not be empty for a visible question.")
-    return QuestionAnswer(question=item.question, answers=answers)
+    return QuestionAnswer(
+        question=item.question,
+        answers=answers,
+        question_text=_clean_optional_text(item.question_text),
+        options=options,
+    )
 
 
-def _normalize_answer_letters(answers: list[str], allowed_answers: set[str]) -> list[str]:
+def _normalize_options(options: list[AnswerOption] | None) -> list[AnswerOption] | None:
+    if options is None:
+        return None
+    normalized: list[AnswerOption] = []
+    seen: set[str] = set()
+    for option in options:
+        option_id = _normalize_answer_id(option.id)
+        if not option_id:
+            raise SolutionValidationError("option id must not be empty.")
+        if option_id in seen:
+            raise SolutionValidationError(f"Duplicate answer option id: {option.id}")
+        normalized.append(AnswerOption(id=option_id, text=option.text.strip()))
+        seen.add(option_id)
+    return normalized
+
+
+def _allowed_answer_ids(
+    options: list[AnswerOption] | None,
+    configured_answers: set[str] | None,
+) -> set[str]:
+    if configured_answers is not None:
+        return {_normalize_answer_id(answer) for answer in configured_answers}
+    if options is not None:
+        return {option.id for option in options}
+    return DEFAULT_ANSWER_IDS
+
+
+def _normalize_answer_ids(answers: list[str], allowed_answers: set[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for answer in answers:
-        value = answer.strip().upper()
+        value = _normalize_answer_id(answer)
         if not value:
             continue
         if value not in allowed_answers:
@@ -250,3 +327,14 @@ def _normalize_answer_letters(answers: list[str], allowed_answers: set[str]) -> 
             normalized.append(value)
             seen.add(value)
     return normalized
+
+
+def _normalize_answer_id(value: str) -> str:
+    return value.strip().upper()
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None

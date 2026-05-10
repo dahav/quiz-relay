@@ -5,7 +5,7 @@ This file is a lightweight project note, not a binding architecture specificatio
 Quiz Relay is intentionally simple:
 
 ```text
-trigger -> screenshot -> AI analysis -> validated answers -> optional HTTP relay
+trigger -> screenshot -> AI analysis -> validated question data -> optional HTTP relay
 ```
 
 The code avoids framework-style layering. A run is coordinated by `quiz_relay.runner.run_once()`, and the implementation is split only where the runtime behavior is naturally different:
@@ -29,4 +29,6 @@ The application should remain usable on Linux, macOS, and Windows where the unde
 
 ## Non-goals
 
-Quiz Relay is not a GUI, web app, browser extension, or receiver service. It only captures an image, asks an AI provider for structured answers, validates the result, logs the run, and optionally sends a compact payload to an HTTP endpoint.
+Quiz Relay is not a GUI, web app, browser extension, or receiver service. It only captures
+an image, asks an AI provider for structured question and answer data, validates the result,
+logs the run, and optionally sends a compact payload to an HTTP endpoint.

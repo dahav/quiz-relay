@@ -3,7 +3,7 @@
 Quiz Relay is a small local CLI that runs one direct flow:
 
 ```text
-trigger -> screenshot -> AI analysis -> validated answers -> optional HTTP relay
+trigger -> screenshot -> AI analysis -> validated question data -> optional HTTP relay
 ```
 
 The internals are intentionally flat. The main modules are:
@@ -89,7 +89,26 @@ quiz-relay parse-response /path/to/response.txt
 - `json`: send a POST request with a JSON body.
 - `query`: send a GET request with mapped values as query parameters.
 
-Configure `[http_relay.fields]` to map outgoing field names to expressions such as `context.task_id`, `solution.answers`, `solution.answers_text`, `solution.explanation`, or `solution.confidence`.
+Configure `[http_relay.fields]` to map outgoing field names to expressions such as
+`context.task_id`, `solution.answers`, `solution.answers_text`, `solution.explanation`,
+or `solution.confidence`.
+
+`solution.answers` includes the selected answer identifiers and, when returned by the
+AI provider, the visible question text plus all visible answer options:
+
+```json
+[
+  {
+    "question": 1,
+    "answers": ["A"],
+    "question_text": "Which option is correct?",
+    "options": [
+      {"id": "A", "text": "First option"},
+      {"id": "B", "text": "Second option"}
+    ]
+  }
+]
+```
 
 ## Runtime Data
 

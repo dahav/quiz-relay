@@ -15,6 +15,35 @@ def test_parses_valid_json():
     assert solution.confidence == 0.5
 
 
+def test_parses_question_text_and_answer_options():
+    solution = parse(
+        """
+        {
+          "explanation": "ok",
+          "answers": [
+            {
+              "question": 1,
+              "question_text": "What is 2 + 2?",
+              "options": [
+                {"id": "1", "text": "3"},
+                {"id": "2", "text": "4"}
+              ],
+              "answers": ["2"]
+            }
+          ],
+          "confidence": 0.5
+        }
+        """
+    )
+    answer = solution.answers[0]
+    assert answer.question_text == "What is 2 + 2?"
+    assert answer.options[0].id == "1"
+    assert answer.options[0].text == "3"
+    assert answer.options[1].id == "2"
+    assert answer.options[1].text == "4"
+    assert answer.answers == ["2"]
+
+
 def test_parses_markdown_json_block():
     solution = parse('```json\n{"explanation":"ok","answers":[],"confidence":null}\n```')
     assert solution.answers == []
