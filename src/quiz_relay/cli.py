@@ -2,24 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-from quiz_relay.app import build_pipeline, build_screenshot_service
+from quiz_relay.ai import parse_ai_response, validate_solution
+from quiz_relay.capture import capture_screenshot, list_monitors
 from quiz_relay.config import load_settings
-from quiz_relay.esp32.esp32_client import Esp32Client
-from quiz_relay.esp32.payload_builder import Esp32PayloadBuilder
 from quiz_relay.errors import ConfigurationError, QuizRelayError
-from quiz_relay.pipeline.result_models import PipelineResult
-from quiz_relay.pipeline.run_context import RunContext
-from quiz_relay.triggers.mouse_listener import SUPPORTED_EVENTS, MouseEvent, MouseEventListener
+from quiz_relay.models import AiRawResponse, AiSolution, QuestionAnswer, RunContext, RunResult
+from quiz_relay.mouse import SUPPORTED_EVENTS, MouseEvent, listen_for_mouse_event
+from quiz_relay.relay import send_solution
+from quiz_relay.runner import run_once
 
 
 def _print_json(data: dict) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
-def _result_to_stdout(result: PipelineResult) -> dict:
+def _result_to_stdout(result: RunResult) -> dict:
     data = {
         "status": result.status,
         "task_id": result.context.task_id,
@@ -30,9 +29,9 @@ def _result_to_stdout(result: PipelineResult) -> dict:
             for item in result.solution.answers
         ]
         data["confidence"] = result.solution.confidence
-    if result.esp32_result:
-        data["esp32_sent"] = result.esp32_result.sent
-        data["esp32_error"] = result.esp32_result.error
+    if result.relay_result:
+        data["relay_sent"] = result.relay_result.sent
+        data["relay_error"] = result.relay_result.error
     if result.error:
         data["error"] = {
             "stage": result.error.stage,
@@ -42,7 +41,7 @@ def _result_to_stdout(result: PipelineResult) -> dict:
     return data
 
 
-def _exit_code(result: PipelineResult) -> int:
+def _exit_code(result: RunResult) -> int:
     if result.status == "success":
         return 0
     if result.status == "partial":
@@ -57,57 +56,54 @@ def _exit_code(result: PipelineResult) -> int:
         return 4
     if result.error and result.error.stage in {"ai_parse", "solution_validation"}:
         return 5
-    if result.error and result.error.stage == "esp32_send":
+    if result.error and result.error.stage == "http_relay_send":
         return 6
     return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="quiz-relay")
-    parser.add_argument("--config", type=Path, help="Pfad zur Konfiguration")
-    parser.add_argument("--profile", help="Konfigurationsprofil")
-    parser.add_argument("--verbose", action="store_true", help="Ausfuehrlichere Logs")
-    parser.add_argument("--quiet", action="store_true", help="Nur Fehler ausgeben")
+    parser.add_argument("--config", type=Path, help="Path to the configuration file")
+    parser.add_argument("--profile", help="Configuration profile name")
+    parser.add_argument("--quiet", action="store_true", help="Only print failed or partial runs")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    solve = subparsers.add_parser("solve", help="Fuehrt einen vollstaendigen Pipeline-Run aus")
+    solve = subparsers.add_parser("solve", help="Run one screenshot-to-relay cycle")
     solve.add_argument("--source", default="cli")
-    solve.add_argument("--no-esp32", action="store_true")
-    solve.add_argument("--save-screenshot", choices=["true", "false"])
+    solve.add_argument("--no-relay", action="store_true")
     solve.add_argument("--test-image", type=Path)
 
-    subparsers.add_parser("test-screenshot", help="Erstellt nur einen Screenshot")
-    subparsers.add_parser("list-monitors", help="Listet erkannte Monitore")
-    subparsers.add_parser("config-check", help="Prueft die Konfiguration")
-    subparsers.add_parser("doctor", help="Gibt Diagnoseinformationen aus")
+    subparsers.add_parser("test-screenshot", help="Capture one screenshot")
+    subparsers.add_parser("list-monitors", help="List detected monitors")
+    subparsers.add_parser("config-check", help="Validate the configuration")
+    subparsers.add_parser("doctor", help="Print basic diagnostics")
 
-    test_esp = subparsers.add_parser("test-esp", help="Sendet ein Testpayload an den ESP32")
-    test_esp.add_argument("--source", default="test")
+    test_relay = subparsers.add_parser("test-relay", help="Send a test payload to the HTTP endpoint")
+    test_relay.add_argument("--source", default="test")
 
-    listen = subparsers.add_parser("listen-mouse", help="Lauscht auf ein Mouse-Event")
+    listen = subparsers.add_parser("listen-mouse", help="Listen for one configured mouse event")
     listen.add_argument("--event", choices=sorted(SUPPORTED_EVENTS))
     listen.add_argument("--scan", action="store_true")
     listen.add_argument("--list-events", action="store_true")
 
-    parse = subparsers.add_parser("parse-response", help="Parst eine gespeicherte KI-Antwort")
+    parse = subparsers.add_parser("parse-response", help="Parse a saved AI response")
     parse.add_argument("file", type=Path)
     return parser
 
 
 def _settings_from_args(args: argparse.Namespace):
     settings = load_settings(args.config, args.profile)
-    if getattr(args, "no_esp32", False):
+    if getattr(args, "no_relay", False):
         from dataclasses import replace
 
-        settings = replace(settings, esp32=replace(settings.esp32, enabled=False))
+        settings = replace(settings, http_relay=replace(settings.http_relay, enabled=False))
     return settings
 
 
 def cmd_solve(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    pipeline = build_pipeline(settings, base_dir=Path("."))
-    result = pipeline.run(source=args.source, test_image=args.test_image)
+    result = run_once(settings, source=args.source, test_image=args.test_image, base_dir=Path("."))
     if not args.quiet or result.status != "success":
         _print_json(_result_to_stdout(result))
     return _exit_code(result)
@@ -115,17 +111,15 @@ def cmd_solve(args: argparse.Namespace) -> int:
 
 def cmd_test_screenshot(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    service = build_screenshot_service(settings)
     context = RunContext.create(source="test", config_profile=settings.app.profile)
-    screenshot = service.capture(context)
+    screenshot = capture_screenshot(settings, context)
     _print_json({"status": "success", "path": screenshot.path, "width": screenshot.width, "height": screenshot.height})
     return 0
 
 
 def cmd_list_monitors(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
-    service = build_screenshot_service(settings)
-    monitors = service.list_monitors()
+    monitors = list_monitors(settings)
     _print_json({"status": "success", "monitors": [monitor.__dict__ for monitor in monitors]})
     return 0
 
@@ -136,21 +130,19 @@ def cmd_config_check(args: argparse.Namespace) -> int:
         {
             "status": "success",
             "profile": settings.app.profile,
-            "screenshot_backend": settings.screenshot.backend,
+            "screenshot_backend": "mss",
             "ai_provider": settings.ai.provider,
-            "esp32_enabled": settings.esp32.enabled,
+            "http_relay_enabled": settings.http_relay.enabled,
         }
     )
     return 0
 
 
-def cmd_test_esp(args: argparse.Namespace) -> int:
-    from quiz_relay.ai.models import AiSolution, QuestionAnswer
-
+def cmd_test_relay(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     context = RunContext.create(source=args.source, config_profile=settings.app.profile)
-    client = Esp32Client(settings.esp32, Esp32PayloadBuilder(settings.esp32))
-    result = client.send_solution(
+    result = send_solution(
+        settings.http_relay,
         context,
         AiSolution(explanation="Testpayload", answers=[QuestionAnswer(question=1, answers=["A"])]),
     )
@@ -173,33 +165,25 @@ def cmd_listen_mouse(args: argparse.Namespace) -> int:
         return 0
 
     settings = _settings_from_args(args)
-    event_name = args.event or settings.mouse_trigger.event
+    event_name = args.event or settings.mouse.event
 
     if args.scan:
-        listener = MouseEventListener(event_name="middle-click", callback=lambda _event: None, scan=True)
-        print("Scanne Mausevents. Beenden mit Ctrl+C.", flush=True)
-        listener.start()
+        print("Scanning mouse events. Stop with Ctrl+C.", flush=True)
+        listen_for_mouse_event(event_name="middle-click", callback=lambda _event: None, scan=True)
         return 0
 
-    pipeline = build_pipeline(settings, base_dir=Path("."))
-
     def run_pipeline(event: MouseEvent) -> None:
-        result = pipeline.run(source="mouse")
+        result = run_once(settings, source="mouse", base_dir=Path("."))
         _print_json({"event": event.name, **_result_to_stdout(result)})
 
-    listener = MouseEventListener(event_name=event_name, callback=run_pipeline)
-    print(f"Lausche auf Mouse-Event: {event_name}", flush=True)
-    listener.start()
+    print(f"Listening for mouse event: {event_name}", flush=True)
+    listen_for_mouse_event(event_name=event_name, callback=run_pipeline)
     return 0
 
 
 def cmd_parse_response(args: argparse.Namespace) -> int:
-    from quiz_relay.ai.models import AiRawResponse
-    from quiz_relay.ai.response_parser import AiResponseParser
-    from quiz_relay.ai.solution_validator import SolutionValidator
-
     text = args.file.read_text(encoding="utf-8")
-    solution = SolutionValidator().validate(AiResponseParser().parse(AiRawResponse(text, "file", "file")))
+    solution = validate_solution(parse_ai_response(AiRawResponse(text, "file", "file")))
     _print_json(
         {
             "status": "success",
@@ -217,9 +201,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "status": "success",
         "config_path": str(settings.config_path) if settings.config_path else None,
         "runtime_directory": str(settings.app.runtime_directory),
-        "screenshot_backend": settings.screenshot.backend,
+        "screenshot_backend": "mss",
         "ai_provider": settings.ai.provider,
-        "mouse_event": settings.mouse_trigger.event,
+        "mouse_event": settings.mouse.event,
     }
     _print_json(data)
     return 0
@@ -233,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         "test-screenshot": cmd_test_screenshot,
         "list-monitors": cmd_list_monitors,
         "config-check": cmd_config_check,
-        "test-esp": cmd_test_esp,
+        "test-relay": cmd_test_relay,
         "listen-mouse": cmd_listen_mouse,
         "parse-response": cmd_parse_response,
         "doctor": cmd_doctor,

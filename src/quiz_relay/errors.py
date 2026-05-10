@@ -45,12 +45,12 @@ class SolutionValidationError(QuizRelayError):
     exit_code = 5
 
 
-class Esp32ConnectionError(QuizRelayError):
-    stage = "esp32_send"
+class HttpRelayConnectionError(QuizRelayError):
+    stage = "http_relay_send"
     exit_code = 6
 
 
-class Esp32HttpError(Esp32ConnectionError):
+class HttpRelayError(HttpRelayConnectionError):
     pass
 
 

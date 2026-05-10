@@ -1,7 +1,7 @@
 import pytest
 
 from quiz_relay.errors import TriggerError
-from quiz_relay.triggers.mouse_listener import button_event_name, ensure_mouse_capture_context, scroll_event_name
+from quiz_relay.mouse import button_event_name, ensure_mouse_capture_context, scroll_event_name
 
 
 class Button:
@@ -22,19 +22,20 @@ def test_scroll_event_mapping():
 
 
 def test_mouse_capture_context_rejects_wayland(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
 
-    with pytest.raises(TriggerError, match="nur unter X11"):
+    with pytest.raises(TriggerError, match="Wayland"):
         ensure_mouse_capture_context()
 
 
 def test_mouse_capture_context_requires_display(monkeypatch):
+    monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.delenv("DISPLAY", raising=False)
 
-    with pytest.raises(TriggerError, match="DISPLAY fehlt"):
+    with pytest.raises(TriggerError, match="DISPLAY"):
         ensure_mouse_capture_context()
-

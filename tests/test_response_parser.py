@@ -1,10 +1,10 @@
-from quiz_relay.ai.models import AiRawResponse
-from quiz_relay.ai.response_parser import AiResponseParser
+from quiz_relay.ai import parse_ai_response
 from quiz_relay.errors import AiResponseParseError
+from quiz_relay.models import AiRawResponse
 
 
 def parse(text: str):
-    return AiResponseParser().parse(AiRawResponse(text=text, provider="test", model="test"))
+    return parse_ai_response(AiRawResponse(text=text, provider="test", model="test"))
 
 
 def test_parses_valid_json():

@@ -2,45 +2,39 @@
 name = "Quiz Relay"
 profile = "default"
 runtime_directory = "runtime"
-save_screenshots = true
 save_ai_raw_response = true
 allow_parallel_runs = false
-minimum_seconds_between_runs = 1.5
 
 [screenshot]
-backend = "mss"
 format = "png"
 delay_ms = 0
 monitor = 1
-region = "full"
-preprocess = false
 
 [ai]
 provider = "openai"
 model = "gpt-4.1-mini"
 timeout_seconds = 30
 response_language = "de"
-strict_json = true
 prompt_file = ".prompt"
 openai_image_detail = "auto"
 max_tokens = 1024
 
-[esp32]
+[http_relay]
 enabled = false
-base_url = "http://192.168.178.55"
-endpoint = "/solution"
+url = "http://127.0.0.1:8080/solution"
+mode = "json"
 timeout_seconds = 2.0
 retries = 2
-send_explanation = false
 
-[mouse_trigger]
-enabled = true
+[http_relay.fields]
+task_id = "context.task_id"
+source = "context.source"
+answers = "solution.answers"
+confidence = "solution.confidence"
+created_at = "meta.created_at"
+
+[mouse]
 event = "middle-click"
-debounce_ms = 750
-ignore_while_running = true
 
 [logging]
-level = "INFO"
 runs_file = "runtime/logs/runs.jsonl"
-app_log_file = "runtime/logs/app.log"
-error_log_file = "runtime/logs/errors.log"

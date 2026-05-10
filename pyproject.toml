@@ -1,7 +1,7 @@
 [project]
 name = "quiz-relay"
 version = "0.1.0"
-description = "Local screenshot quiz solver with AI analysis and ESP32 relay"
+description = "Local screenshot quiz solver with AI analysis and configurable HTTP relay"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic",

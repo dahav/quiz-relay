@@ -9,7 +9,7 @@ Guide for humans and coding agents in this repository.
 1. Taking a screenshot
 2. Running AI analysis on the image
 3. Validating answers
-4. Optionally sending a compact result to ESP32
+4. Optionally sending a structured result to HTTP endpoints
 
 ## Project structure (important)
 
@@ -17,7 +17,7 @@ Guide for humans and coding agents in this repository.
 - `tests/` - pytest tests
 - `config.example.toml` - reference configuration
 - `README.md` - user documentation
-- `docs/` - additional docs (`gnome_shortcut.md`, `esp32_protocol.md`)
+- `docs/` - additional docs (`gnome_shortcut.md`, `http_relay.md`)
 
 ## Quick setup
 
@@ -114,4 +114,3 @@ or
 - Do not commit API keys, tokens, or private endpoints.
 - Do not ship silent behavior changes without docs/tests.
 - Do not version manual artifacts (`runtime/`, screenshots, logs).
-

@@ -14,20 +14,15 @@ class AppConfig:
     name: str = "Quiz Relay"
     profile: str = "default"
     runtime_directory: Path = Path("runtime")
-    save_screenshots: bool = True
     save_ai_raw_response: bool = True
     allow_parallel_runs: bool = False
-    minimum_seconds_between_runs: float = 1.5
 
 
 @dataclass(frozen=True)
 class ScreenshotConfig:
-    backend: str = "mss"
     format: str = "png"
     delay_ms: int = 0
     monitor: int = 1
-    region: str = "full"
-    preprocess: bool = False
 
 
 @dataclass(frozen=True)
@@ -36,36 +31,29 @@ class AiConfig:
     model: str = "gpt-4.1-mini"
     timeout_seconds: float = 30
     response_language: str = "de"
-    strict_json: bool = True
     prompt_file: Path | None = Path(".prompt")
     openai_image_detail: str = "auto"
     max_tokens: int = 1024
 
 
 @dataclass(frozen=True)
-class Esp32Config:
+class HttpRelayConfig:
     enabled: bool = False
-    base_url: str = "http://192.168.178.55"
-    endpoint: str = "/solution"
+    url: str = "http://127.0.0.1:8080/solution"
+    mode: str = "json"
     timeout_seconds: float = 2.0
     retries: int = 2
-    send_explanation: bool = False
+    fields: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
-class MouseTriggerConfig:
-    enabled: bool = True
+class MouseConfig:
     event: str = "middle-click"
-    debounce_ms: int = 750
-    ignore_while_running: bool = True
 
 
 @dataclass(frozen=True)
 class LoggingConfig:
-    level: str = "INFO"
     runs_file: Path = Path("runtime/logs/runs.jsonl")
-    app_log_file: Path = Path("runtime/logs/app.log")
-    error_log_file: Path = Path("runtime/logs/errors.log")
 
 
 @dataclass(frozen=True)
@@ -73,8 +61,8 @@ class Settings:
     app: AppConfig
     screenshot: ScreenshotConfig
     ai: AiConfig
-    esp32: Esp32Config
-    mouse_trigger: MouseTriggerConfig
+    http_relay: HttpRelayConfig
+    mouse: MouseConfig
     logging: LoggingConfig
     config_path: Path | None = None
 
@@ -91,11 +79,11 @@ def _read_toml(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
     if not path.is_file():
-        raise ConfigurationError(f"Konfigurationsdatei nicht gefunden: {path}")
+        raise ConfigurationError(f"Configuration file not found: {path}")
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigurationError(f"Konfigurationsdatei ist ungueltig: {exc}") from exc
+        raise ConfigurationError(f"Configuration file is invalid: {exc}") from exc
 
 
 def _path(value: str | Path | None) -> Path | None:
@@ -107,7 +95,7 @@ def _path(value: str | Path | None) -> Path | None:
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
     value = data.get(name, {})
     if not isinstance(value, dict):
-        raise ConfigurationError(f"Konfigurationssektion [{name}] muss eine Tabelle sein.")
+        raise ConfigurationError(f"Configuration section [{name}] must be a table.")
     return value
 
 
@@ -121,8 +109,8 @@ def load_settings(config_path: str | Path | None = None, profile: str | None = N
     app_data = _section(data, "app")
     screenshot_data = _section(data, "screenshot")
     ai_data = _section(data, "ai")
-    esp32_data = _section(data, "esp32")
-    mouse_data = _section(data, "mouse_trigger")
+    relay_data = _section(data, "http_relay")
+    mouse_data = _section(data, "mouse") or _section(data, "mouse_trigger")
     logging_data = _section(data, "logging")
 
     selected_profile = profile or os.getenv("QUIZ_RELAY_PROFILE") or app_data.get("profile", "default")
@@ -130,52 +118,45 @@ def load_settings(config_path: str | Path | None = None, profile: str | None = N
         name=str(app_data.get("name", "Quiz Relay")),
         profile=str(selected_profile),
         runtime_directory=Path(app_data.get("runtime_directory", "runtime")),
-        save_screenshots=bool(app_data.get("save_screenshots", True)),
         save_ai_raw_response=bool(app_data.get("save_ai_raw_response", True)),
         allow_parallel_runs=bool(app_data.get("allow_parallel_runs", False)),
-        minimum_seconds_between_runs=float(app_data.get("minimum_seconds_between_runs", 1.5)),
     )
     screenshot = ScreenshotConfig(
-        backend=str(screenshot_data.get("backend", "mss")).lower(),
         format=str(screenshot_data.get("format", "png")).lower(),
         delay_ms=int(screenshot_data.get("delay_ms", 0)),
         monitor=int(screenshot_data.get("monitor", 1)),
-        region=str(screenshot_data.get("region", "full")),
-        preprocess=bool(screenshot_data.get("preprocess", False)),
     )
     ai = AiConfig(
         provider=str(ai_data.get("provider", "openai")).lower(),
         model=str(ai_data.get("model", "gpt-4.1-mini")),
         timeout_seconds=float(ai_data.get("timeout_seconds", 30)),
         response_language=str(ai_data.get("response_language", "de")),
-        strict_json=bool(ai_data.get("strict_json", True)),
         prompt_file=_path(ai_data.get("prompt_file", ".prompt")),
         openai_image_detail=str(ai_data.get("openai_image_detail", "auto")),
         max_tokens=int(ai_data.get("max_tokens", 1024)),
     )
-    esp32 = Esp32Config(
-        enabled=bool(esp32_data.get("enabled", False)),
-        base_url=str(esp32_data.get("base_url", "http://192.168.178.55")).rstrip("/"),
-        endpoint=str(esp32_data.get("endpoint", "/solution")),
-        timeout_seconds=float(esp32_data.get("timeout_seconds", 2.0)),
-        retries=int(esp32_data.get("retries", 2)),
-        send_explanation=bool(esp32_data.get("send_explanation", False)),
+    relay_fields = relay_data.get("fields")
+    if relay_fields is not None and not isinstance(relay_fields, dict):
+        raise ConfigurationError("Configuration section [http_relay.fields] must be a table.")
+    http_relay = HttpRelayConfig(
+        enabled=bool(relay_data.get("enabled", False)),
+        url=str(relay_data.get("url", "http://127.0.0.1:8080/solution")),
+        mode=str(relay_data.get("mode", "json")).lower(),
+        timeout_seconds=float(relay_data.get("timeout_seconds", 2.0)),
+        retries=int(relay_data.get("retries", 2)),
+        fields={str(key): str(value) for key, value in relay_fields.items()} if relay_fields else None,
     )
-    mouse = MouseTriggerConfig(
-        enabled=bool(mouse_data.get("enabled", True)),
+    mouse = MouseConfig(
         event=str(mouse_data.get("event", "middle-click")),
-        debounce_ms=int(mouse_data.get("debounce_ms", 750)),
-        ignore_while_running=bool(mouse_data.get("ignore_while_running", True)),
     )
     logging = LoggingConfig(
-        level=str(logging_data.get("level", "INFO")),
         runs_file=Path(logging_data.get("runs_file", "runtime/logs/runs.jsonl")),
-        app_log_file=Path(logging_data.get("app_log_file", "runtime/logs/app.log")),
-        error_log_file=Path(logging_data.get("error_log_file", "runtime/logs/errors.log")),
     )
 
     if screenshot.format != "png":
-        raise ConfigurationError("Initial wird nur Screenshot-Format 'png' unterstuetzt.")
-    if esp32.retries < 0:
-        raise ConfigurationError("esp32.retries darf nicht negativ sein.")
-    return Settings(app, screenshot, ai, esp32, mouse, logging, selected_path)
+        raise ConfigurationError("Only screenshot format 'png' is currently supported.")
+    if http_relay.mode not in {"json", "query"}:
+        raise ConfigurationError("http_relay.mode must be 'json' or 'query'.")
+    if http_relay.retries < 0:
+        raise ConfigurationError("http_relay.retries must not be negative.")
+    return Settings(app, screenshot, ai, http_relay, mouse, logging, selected_path)

@@ -1,28 +1,31 @@
 # Quiz Relay
 
-Quiz Relay is a local CLI tool that analyzes multiple-choice questions from screenshots and can optionally send the result to an ESP32-compatible HTTP endpoint.
-
-Core flow:
+Quiz Relay is a small local CLI that runs one direct flow:
 
 ```text
-Trigger -> Screenshot -> AI analysis -> JSON solution -> optional ESP32 POST
+trigger -> screenshot -> AI analysis -> validated answers -> optional HTTP relay
 ```
 
-## What this project does
+The internals are intentionally flat. The main modules are:
 
-- Capture screenshots and list monitor information (`mss` backend)
-- Analyze images and solve quizzes using OpenAI or Anthropic
-- Parse and validate AI responses into a compact answer format
-- Log results locally
-- Optionally send a compact payload to ESP32
-- Trigger via CLI, one-shot shortcut run, or mouse listener
+- `runner.py`: coordinates one run.
+- `capture.py`: captures screenshots with `mss` and lists monitors.
+- `ai.py`: builds the prompt, calls OpenAI or Anthropic, parses and validates the response.
+- `relay.py`: builds and sends the optional HTTP payload.
+- `mouse.py`: listens for mouse events through `pynput`.
+- `models.py`: shared dataclasses.
+- `cli.py`: command-line interface.
 
 ## Requirements
 
-- Linux desktop session for screenshot features
 - Python 3.11+
 - `make`
-- For global mouse events (`listen-mouse`): currently X11/Xorg only (Wayland exits with a clear error message)
+- A desktop session that allows screenshots
+- API key in the environment, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+
+Screenshot capture uses `mss`, which supports Linux, macOS, and Windows. Platform permissions still apply. On macOS, screen recording permission may be required. On Windows, desktop capture must be allowed for the running user.
+
+Mouse listening uses `pynput`. Linux Wayland sessions usually block global mouse events, so `listen-mouse` exits with a clear error there. X11, macOS, and Windows are kept as supported targets, subject to OS accessibility/privacy permissions.
 
 ## Quickstart
 
@@ -32,142 +35,89 @@ make setup
 cp config.example.toml config.toml
 ```
 
-Optional: set API keys in `.env` (or your shell), for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
-
-Initial checks:
+Run initial checks:
 
 ```bash
-cd /path/to/quiz-relay
 .venv/bin/quiz-relay --config config.toml config-check
 .venv/bin/quiz-relay --config config.toml list-monitors
 .venv/bin/quiz-relay --config config.toml test-screenshot
+```
+
+Run one full cycle:
+
+```bash
+.venv/bin/quiz-relay --config config.toml solve --source cli
 ```
 
 ## Configuration
 
 Example configuration: `config.example.toml`
 
-Important sections:
+Sections:
 
-- `[app]`: runtime directory and general runtime behavior
-- `[screenshot]`: backend, monitor index, delay
-- `[ai]`: provider (`openai`/`anthropic`), model, timeout, prompt file
-- `[esp32]`: enable flag, URL, endpoint, timeout, retries
-- `[mouse_trigger]`: default mouse event
-- `[logging]`: log and runs files
+- `[app]`: profile, runtime directory, run lock behavior, raw AI response logging.
+- `[screenshot]`: PNG format, monitor index, optional capture delay.
+- `[ai]`: provider, model, timeout, response language, prompt file.
+- `[http_relay]`: enable flag, URL, mode, timeout, retries.
+- `[http_relay.fields]`: optional outgoing payload mapping.
+- `[mouse]`: default mouse event.
+- `[logging]`: JSONL run log path.
 
-Selecting configuration:
+Configuration can be selected with `--config /path/to/config.toml` or `QUIZ_RELAY_CONFIG`. The profile can be selected with `--profile` or `QUIZ_RELAY_PROFILE`.
 
-- via CLI: `--config /path/to/config.toml`
-- via ENV: `QUIZ_RELAY_CONFIG=/path/to/config.toml`
-- profile via `--profile` or `QUIZ_RELAY_PROFILE`
-
-## CLI commands
-
-### Diagnostics and setup
+## Commands
 
 ```bash
 quiz-relay config-check
 quiz-relay doctor
 quiz-relay list-monitors
 quiz-relay test-screenshot
-```
-
-### Run pipeline
-
-```bash
 quiz-relay solve --source cli
 quiz-relay solve --source shortcut
-quiz-relay solve --test-image examfit/test.png --no-esp32
-```
-
-### Mouse listener
-
-```bash
+quiz-relay solve --test-image /path/to/image.png --no-relay
 quiz-relay listen-mouse --list-events
 quiz-relay listen-mouse --scan
 quiz-relay listen-mouse --event middle-click
+quiz-relay test-relay --source test
+quiz-relay parse-response /path/to/response.txt
 ```
 
-### ESP32 test
+## HTTP Relay
 
-```bash
-quiz-relay test-esp --source test
-```
+`[http_relay].mode` controls transport:
 
-## Common issues and fixes
+- `json`: send a POST request with a JSON body.
+- `query`: send a GET request with mapped values as query parameters.
 
-### `quiz-relay: command not found`
+Configure `[http_relay.fields]` to map outgoing field names to expressions such as `context.task_id`, `solution.answers`, `solution.answers_text`, `solution.explanation`, or `solution.confidence`.
 
-Use the venv binary directly or activate the venv:
+## Runtime Data
 
-```bash
-cd /path/to/quiz-relay
-source .venv/bin/activate
-quiz-relay config-check
-```
-
-Or directly:
-
-```bash
-cd /path/to/quiz-relay
-.venv/bin/quiz-relay config-check
-```
-
-### `list-monitors` reports missing `mss`
-
-```bash
-cd /path/to/quiz-relay
-.venv/bin/python -m pip install -e '.[dev]'
-```
-
-### `listen-mouse --scan` does not react / exits with TriggerError
-
-`pynput`-based global mouse events are intentionally limited to X11 here. Under Wayland, the command exits with a clear hint. Switch to an X11/Xorg session for this command.
-
-## Output and runtime data
-
-Default paths (configurable in `config.toml`):
+Default paths:
 
 - Screenshots: `runtime/screenshots/`
-- Run-Logs: `runtime/logs/runs.jsonl`
-- App-Logs: `runtime/logs/app.log`
-- Error logs: `runtime/logs/errors.log`
+- Run log: `runtime/logs/runs.jsonl`
+- Lock file while a run is active: `runtime/quiz-relay.lock`
+
+Run log timestamps use the local system timezone and include the UTC offset, for example `2026-05-07T16:33:26.381+02:00`.
 
 ## Development
 
-Create or refresh the local virtual environment:
-
 ```bash
-cd /path/to/quiz-relay
 make setup
+.venv/bin/python -m pytest
 ```
 
-Remove generated artifacts:
+Run one focused test:
 
 ```bash
-cd /path/to/quiz-relay
-make clean
+.venv/bin/python -m pytest tests/test_mouse_listener.py
 ```
 
 `make clean` removes Python cache files, test/build artifacts, egg-info directories, coverage output, and `runtime/`.
 
-Run all tests:
-
-```bash
-cd /path/to/quiz-relay
-.venv/bin/python -m pytest
-```
-
-Run a single test:
-
-```bash
-cd /path/to/quiz-relay
-.venv/bin/python -m pytest tests/test_mouse_listener.py
-```
-
-## Additional docs
+## Additional Docs
 
 - `docs/gnome_shortcut.md`
-- `docs/esp32_protocol.md`
+- `docs/http_relay.md`
 - `spec.md`
