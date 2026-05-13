@@ -63,6 +63,8 @@ Supported expressions:
 - `solution.answers`
 - `solution.answer_letters`
 - `solution.answers_text`
+- `solution.vibe_n`
+- `solution.vibe_seq`
 - `solution.explanation`
 - `solution.confidence`
 - `solution.raw_response`
@@ -71,5 +73,10 @@ Supported expressions:
 
 `solution.answers` contains the selected answer identifiers in `answers`. It also
 includes `question_text` and all visible `options` when the AI provider returned them.
+
+`solution.vibe_n` maps a single selected answer to a pulse count for vibration
+endpoints: `A` or `1` becomes `1`, `B` or `2` becomes `2`, and so on through
+`I` or `9`. `solution.vibe_seq` emits a comma-separated sequence when multiple
+answers are selected.
 
 HTTP 2xx is treated as success. HTTP 4xx is returned immediately. Timeouts and HTTP 5xx responses are retried according to `retries`.

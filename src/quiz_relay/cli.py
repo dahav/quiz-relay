@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -99,10 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
-    settings = load_settings(args.config, args.profile)
+    settings = load_settings(_config_path_from_args(args.config), args.profile)
     if getattr(args, "no_relay", False):
         settings = replace(settings, http_relay=replace(settings.http_relay, enabled=False))
     return settings
+
+
+def _config_path_from_args(config_path: Path | None) -> Path | None:
+    if config_path is not None:
+        return config_path
+    if os.getenv("QUIZ_RELAY_CONFIG", "").strip():
+        return None
+    default_path = Path("config.toml")
+    return default_path if default_path.is_file() else None
 
 
 def cmd_solve(args: argparse.Namespace) -> int:
@@ -152,14 +162,14 @@ def cmd_test_relay(args: argparse.Namespace) -> int:
     )
     _print_json(
         {
-            "status": "success" if result.sent or result.error == "disabled" else "failed",
+            "status": "success" if result.sent else "failed",
             "sent": result.sent,
             "status_code": result.status_code,
             "response_body": result.response_body,
             "error": result.error,
         }
     )
-    return 0 if result.sent or result.error == "disabled" else 6
+    return 0 if result.sent else 6
 
 
 def cmd_listen_mouse(args: argparse.Namespace) -> int:

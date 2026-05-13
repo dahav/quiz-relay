@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from pathlib import Path
 from typing import Any, Callable
 
@@ -75,8 +76,11 @@ class RunLock:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(self._fd, f"{context.task_id}\n".encode("utf-8"))
+            os.write(self._fd, self._lock_payload(context))
         except FileExistsError as exc:
+            if self._remove_stale_lock():
+                self.acquire(context)
+                return
             raise RunAlreadyActiveError("A run is already active.") from exc
 
     def release(self) -> None:
@@ -88,6 +92,67 @@ class RunLock:
             self.lock_path.unlink()
         except FileNotFoundError:
             pass
+
+    def _lock_payload(self, context: RunContext) -> bytes:
+        return (
+            json.dumps(
+                {
+                    "task_id": context.task_id,
+                    "pid": os.getpid(),
+                    "host": context.host,
+                    "started_at": context.started_iso(),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+
+    def _remove_stale_lock(self) -> bool:
+        try:
+            text = self.lock_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return self._unlink_stale_lock()
+
+        if not isinstance(payload, dict):
+            return self._unlink_stale_lock()
+
+        if payload.get("host") != socket.gethostname():
+            return False
+
+        try:
+            pid = int(payload["pid"])
+        except (KeyError, TypeError, ValueError):
+            return self._unlink_stale_lock()
+
+        if pid <= 0 or _process_exists(pid):
+            return False
+        return self._unlink_stale_lock()
+
+    def _unlink_stale_lock(self) -> bool:
+        try:
+            self.lock_path.unlink()
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        return True
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def write_run_log(settings: Settings, result: RunResult) -> None:

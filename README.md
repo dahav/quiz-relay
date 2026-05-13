@@ -63,7 +63,7 @@ Sections:
 - `[mouse]`: default mouse event.
 - `[logging]`: JSONL run log path.
 
-Configuration can be selected with `--config /path/to/config.toml` or `QUIZ_RELAY_CONFIG`. The profile can be selected with `--profile` or `QUIZ_RELAY_PROFILE`.
+Configuration can be selected with `--config /path/to/config.toml` or `QUIZ_RELAY_CONFIG`. If neither is set, the CLI automatically uses `./config.toml` when it exists. The profile can be selected with `--profile` or `QUIZ_RELAY_PROFILE`.
 
 ## Commands
 
@@ -91,7 +91,7 @@ quiz-relay parse-response /path/to/response.txt
 
 Configure `[http_relay.fields]` to map outgoing field names to expressions such as
 `context.task_id`, `solution.answers`, `solution.answers_text`, `solution.explanation`,
-or `solution.confidence`.
+`solution.confidence`, `solution.vibe_n`, or `solution.vibe_seq`.
 
 `solution.answers` includes the selected answer identifiers and, when returned by the
 AI provider, the visible question text plus all visible answer options:
@@ -110,6 +110,11 @@ AI provider, the visible question text plus all visible answer options:
 ]
 ```
 
+`solution.vibe_n` maps a single selected answer to a pulse count for vibration
+endpoints: `A` or `1` becomes `1`, `B` or `2` becomes `2`, and so on through
+`I` or `9`. `solution.vibe_seq` emits a comma-separated sequence when multiple
+answers are selected.
+
 ## Runtime Data
 
 Default paths:
@@ -117,6 +122,8 @@ Default paths:
 - Screenshots: `runtime/screenshots/`
 - Run log: `runtime/logs/runs.jsonl`
 - Lock file while a run is active: `runtime/quiz-relay.lock`
+
+If the application was terminated while a run was active, the next run removes a stale local lock automatically.
 
 Run log timestamps use the local system timezone and include the UTC offset, for example `2026-05-07T16:33:26.381+02:00`.
 

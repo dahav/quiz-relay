@@ -3,9 +3,12 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+import pytest
+
 from quiz_relay.config import load_settings
-from quiz_relay.models import AiRawResponse, RelaySendResult, ScreenshotResult
-from quiz_relay.runner import run_once, run_record
+from quiz_relay.errors import RunAlreadyActiveError
+from quiz_relay.models import AiRawResponse, RelaySendResult, RunContext, ScreenshotResult
+from quiz_relay.runner import RunLock, run_once, run_record
 
 
 class LoggerStub:
@@ -104,3 +107,51 @@ def test_run_test_image_skips_capture(tmp_path: Path):
     )
     assert result.status == "success"
     assert capture.called is False
+
+
+def test_lock_replaces_legacy_stale_lock(tmp_path: Path):
+    lock_path = tmp_path / "quiz-relay.lock"
+    lock_path.write_text("old-task-id\n", encoding="utf-8")
+    context = make_context()
+    lock = RunLock(lock_path)
+
+    lock.acquire(context)
+
+    assert lock_path.read_text(encoding="utf-8").startswith("{")
+    lock.release()
+
+
+def test_lock_keeps_active_process_lock(tmp_path: Path, monkeypatch):
+    lock_path = tmp_path / "quiz-relay.lock"
+    context = make_context()
+    lock_path.write_text(
+        f'{{"task_id":"other","pid":123,"host":"{context.host}","started_at":"now"}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("quiz_relay.runner._process_exists", lambda pid: True)
+
+    lock = RunLock(lock_path)
+
+    with pytest.raises(RunAlreadyActiveError):
+        lock.acquire(context)
+
+
+def test_lock_replaces_dead_process_lock(tmp_path: Path, monkeypatch):
+    lock_path = tmp_path / "quiz-relay.lock"
+    context = make_context()
+    lock_path.write_text(
+        f'{{"task_id":"other","pid":123,"host":"{context.host}","started_at":"now"}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("quiz_relay.runner._process_exists", lambda pid: False)
+
+    lock = RunLock(lock_path)
+
+    lock.acquire(context)
+
+    assert context.task_id in lock_path.read_text(encoding="utf-8")
+    lock.release()
+
+
+def make_context():
+    return RunContext.create(source="test")

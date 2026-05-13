@@ -22,6 +22,11 @@ DEFAULT_RELAY_FIELDS = {
 
 RETRY_DELAY_SECONDS = 0.1
 MISSING_FIELD = object()
+MAX_VIBE_SEQUENCE_GROUPS = 8
+VIBE_PULSE_BY_ANSWER = {
+    letter: str(index)
+    for index, letter in enumerate("ABCDEFGHI", start=1)
+} | {str(index): str(index) for index in range(1, 10)}
 
 
 def send_solution(config: HttpRelayConfig, context: RunContext, solution: AiSolution) -> RelaySendResult:
@@ -112,6 +117,8 @@ def _resolve_known_field(expression: str, context: RunContext, solution: AiSolut
         "solution.answers": solution.answer_dicts,
         "solution.answer_letters": lambda: _answer_letters(solution),
         "solution.answers_text": lambda: ",".join(_answer_letters(solution)),
+        "solution.vibe_n": lambda: _vibe_n(solution),
+        "solution.vibe_seq": lambda: _vibe_seq(solution),
         "solution.explanation": lambda: solution.explanation,
         "solution.confidence": lambda: solution.confidence,
         "solution.raw_response": lambda: solution.raw_response,
@@ -131,6 +138,28 @@ def _resolve_known_field(expression: str, context: RunContext, solution: AiSolut
 
 def _answer_letters(solution: AiSolution) -> list[str]:
     return [answer for item in solution.answers for answer in item.answers]
+
+
+def _vibe_n(solution: AiSolution) -> str | None:
+    pulses = _vibe_pulses(solution)
+    if len(pulses) == 1:
+        return pulses[0]
+    return None
+
+
+def _vibe_seq(solution: AiSolution) -> str | None:
+    pulses = _vibe_pulses(solution)
+    if len(pulses) > 1:
+        return ",".join(pulses[:MAX_VIBE_SEQUENCE_GROUPS])
+    return None
+
+
+def _vibe_pulses(solution: AiSolution) -> list[str]:
+    return [
+        pulse_count
+        for answer in _answer_letters(solution)
+        if (pulse_count := VIBE_PULSE_BY_ANSWER.get(answer.strip().upper())) is not None
+    ]
 
 
 def _as_payload_value(value: Any) -> Any:
