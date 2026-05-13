@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,9 +15,16 @@ class ScreenshotConfig:
 class AiConfig:
     provider: str = "openai"
     model: str = "gpt-4.1-mini"
+    reasoning_effort: str | None = None
     timeout_seconds: float = 30.0
     response_language: str = "de"
-    prompt_file: Path | None = Path(".prompt")
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+
+
+@dataclass(frozen=True)
+class PromptsConfig:
+    dir: Path = Path("prompts")
 
 
 @dataclass(frozen=True)
@@ -43,37 +49,22 @@ class Settings:
     ai: AiConfig
     relay: RelayConfig
     mouse: MouseConfig
+    prompts: PromptsConfig
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()
-    except ImportError:
-        pass
-
-    path = config_path or _default_config_path()
-    data: dict[str, Any] = {}
-    if path is not None:
-        if not path.is_file():
-            raise SystemExit(f"Configuration file not found: {path}")
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    path = config_path or Path("config.toml")
+    if not path.is_file():
+        raise SystemExit(f"Configuration file not found: {path}")
+    data: dict[str, Any] = tomllib.loads(path.read_text(encoding="utf-8"))
 
     return Settings(
         screenshot=_screenshot(data.get("screenshot", {})),
         ai=_ai(data.get("ai", {})),
         relay=_relay(data.get("relay", {})),
         mouse=_mouse(data.get("mouse", {})),
+        prompts=_prompts(data.get("prompts", {})),
     )
-
-
-def _default_config_path() -> Path | None:
-    env = os.getenv("QUIZ_RELAY_CONFIG", "").strip()
-    if env:
-        return Path(env).expanduser()
-    default = Path("config.toml")
-    return default if default.is_file() else None
 
 
 def _screenshot(data: dict) -> ScreenshotConfig:
@@ -81,14 +72,22 @@ def _screenshot(data: dict) -> ScreenshotConfig:
 
 
 def _ai(data: dict) -> AiConfig:
-    prompt_file = data.get("prompt_file", ".prompt")
+    effort = data.get("reasoning_effort")
+    openai_key = data.get("openai_api_key")
+    anthropic_key = data.get("anthropic_api_key")
     return AiConfig(
         provider=str(data.get("provider", "openai")).lower(),
         model=str(data.get("model", "gpt-4.1-mini")),
+        reasoning_effort=str(effort).lower() if effort else None,
         timeout_seconds=float(data.get("timeout_seconds", 30.0)),
         response_language=str(data.get("response_language", "de")),
-        prompt_file=Path(prompt_file).expanduser() if prompt_file else None,
+        openai_api_key=str(openai_key) if openai_key else None,
+        anthropic_api_key=str(anthropic_key) if anthropic_key else None,
     )
+
+
+def _prompts(data: dict) -> PromptsConfig:
+    return PromptsConfig(dir=Path(data.get("dir", "prompts")).expanduser())
 
 
 def _relay(data: dict) -> RelayConfig:

@@ -8,7 +8,6 @@ dependencies = [
     "mss",
     "openai",
     "pynput",
-    "python-dotenv",
 ]
 
 [project.scripts]

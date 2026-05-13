@@ -13,6 +13,16 @@ from quiz_relay.config import Settings
 
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.IGNORECASE)
 
+BASE_MODE = "multiplechoice"
+
+IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 VIBE_PULSE = {letter: i for i, letter in enumerate("ABCDEFGHI", 1)} | {str(i): i for i in range(1, 10)}
 
 DEFAULT_PROMPT = """Analyze the provided image.
@@ -52,14 +62,60 @@ Rules:
 """
 
 
-def solve(settings: Settings) -> dict:
-    screenshot = capture_screenshot(settings)
-    raw = ask_ai(screenshot, settings)
+def solve(settings: Settings, mode: str, image: Path | None = None) -> dict:
+    _load_mode(settings.prompts.dir, mode)
+    if image is not None:
+        source = _validate_image(image)
+        source_key = "image"
+    else:
+        source = capture_screenshot(settings)
+        source_key = "screenshot"
+    raw = ask_ai(source, settings, mode)
     solution = parse_response(raw)
-    result: dict = {"screenshot": str(screenshot), "solution": solution}
+    result: dict = {"mode": mode, source_key: str(source), "solution": solution}
     if settings.relay.enabled:
         result["relay"] = send_relay(settings, solution)
     return result
+
+
+def _validate_image(path: Path) -> Path:
+    if not path.is_file():
+        raise SystemExit(f"Image file not found: {path}")
+    if path.suffix.lower() not in IMAGE_MIME_TYPES:
+        supported = ", ".join(sorted(IMAGE_MIME_TYPES))
+        raise SystemExit(f"Unsupported image format '{path.suffix}'. Supported: {supported}")
+    return path
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+
+def available_modes(prompts_dir: Path) -> list[str]:
+    if not prompts_dir.is_dir():
+        return []
+    return sorted(path.stem for path in prompts_dir.glob("*.md") if path.stem != BASE_MODE)
+
+
+def validate_mode(prompts_dir: Path, mode: str) -> None:
+    _load_mode(prompts_dir, mode)
+
+
+def _load_mode(prompts_dir: Path, mode: str) -> str:
+    if mode == BASE_MODE:
+        raise SystemExit(f"'{BASE_MODE}' is the common base and cannot be used as a mode.")
+    path = prompts_dir / f"{mode}.md"
+    if not path.is_file():
+        available = available_modes(prompts_dir)
+        hint = ", ".join(available) if available else "(none)"
+        raise SystemExit(f"Unknown mode '{mode}'. Available: {hint}")
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise SystemExit(f"Mode file is empty: {path}")
+    return text
 
 
 def capture_screenshot(settings: Settings) -> Path:
@@ -90,51 +146,65 @@ def _ensure_screenshot_has_content(rgb: bytes) -> None:
         )
 
 
-def build_prompt(settings: Settings) -> str:
-    prompt = DEFAULT_PROMPT.format(language=settings.ai.response_language)
-    extra_file = settings.ai.prompt_file
-    if extra_file and extra_file.is_file():
-        extra = extra_file.read_text(encoding="utf-8").strip()
-        if extra:
-            prompt = f"{prompt}\nAdditional instructions:\n{extra}\n"
-    return prompt
+def build_prompt(settings: Settings, mode: str) -> str:
+    base = DEFAULT_PROMPT.format(language=settings.ai.response_language)
+    extra = _load_mode(settings.prompts.dir, mode)
+    common_path = settings.prompts.dir / f"{BASE_MODE}.md"
+    common = common_path.read_text(encoding="utf-8").strip() if common_path.is_file() else ""
+    sections = [base, f"Mode: {mode}"]
+    if common:
+        sections.append(f"Common instructions:\n{common}")
+    sections.append(f"Additional instructions:\n{extra}")
+    return "\n".join(sections) + "\n"
 
 
-def ask_ai(image_path: Path, settings: Settings) -> str:
-    prompt = build_prompt(settings)
+def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
+    prompt = build_prompt(settings, mode)
     image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    mime = IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/png")
     provider = settings.ai.provider
-    print(f"calling AI... (provider={provider}, model={settings.ai.model})", file=sys.stderr, flush=True)
+    parts = [f"provider={provider}", f"model={settings.ai.model}", f"mode={mode}"]
+    if settings.ai.reasoning_effort:
+        parts.append(f"effort={settings.ai.reasoning_effort}")
+    parts.append(f"image={_display_path(image_path)}")
+    print(f"calling AI... ({', '.join(parts)})", file=sys.stderr, flush=True)
     if provider in {"openai", "chatgpt"}:
-        return _ask_openai(prompt, image_b64, settings)
+        return _ask_openai(prompt, image_b64, mime, settings)
     if provider in {"anthropic", "claude"}:
-        return _ask_anthropic(prompt, image_b64, settings)
+        return _ask_anthropic(prompt, image_b64, mime, settings)
     raise SystemExit(f"Unknown AI provider: {provider}")
 
 
-def _ask_openai(prompt: str, image_b64: str, settings: Settings) -> str:
+def _ask_openai(prompt: str, image_b64: str, mime: str, settings: Settings) -> str:
     from openai import OpenAI
 
-    client = OpenAI(timeout=settings.ai.timeout_seconds)
-    response = client.responses.create(
-        model=settings.ai.model,
-        input=[
+    if not settings.ai.openai_api_key:
+        raise SystemExit("openai_api_key is not set in config.toml ([ai] section).")
+    client = OpenAI(api_key=settings.ai.openai_api_key, timeout=settings.ai.timeout_seconds)
+    kwargs: dict = {
+        "model": settings.ai.model,
+        "input": [
             {
                 "role": "user",
                 "content": [
                     {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": f"data:image/png;base64,{image_b64}"},
+                    {"type": "input_image", "image_url": f"data:{mime};base64,{image_b64}"},
                 ],
             }
         ],
-    )
+    }
+    if settings.ai.reasoning_effort:
+        kwargs["reasoning"] = {"effort": settings.ai.reasoning_effort}
+    response = client.responses.create(**kwargs)
     return response.output_text.strip()
 
 
-def _ask_anthropic(prompt: str, image_b64: str, settings: Settings) -> str:
+def _ask_anthropic(prompt: str, image_b64: str, mime: str, settings: Settings) -> str:
     import anthropic
 
-    client = anthropic.Anthropic(timeout=settings.ai.timeout_seconds)
+    if not settings.ai.anthropic_api_key:
+        raise SystemExit("anthropic_api_key is not set in config.toml ([ai] section).")
+    client = anthropic.Anthropic(api_key=settings.ai.anthropic_api_key, timeout=settings.ai.timeout_seconds)
     message = client.messages.create(
         model=settings.ai.model,
         max_tokens=1024,
@@ -144,7 +214,7 @@ def _ask_anthropic(prompt: str, image_b64: str, settings: Settings) -> str:
                 "content": [
                     {
                         "type": "image",
-                        "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
+                        "source": {"type": "base64", "media_type": mime, "data": image_b64},
                     },
                     {"type": "text", "text": prompt},
                 ],
@@ -199,8 +269,11 @@ def send_relay(settings: Settings, solution: dict) -> dict:
     url = settings.relay.url
     sep = "&" if urllib.parse.urlparse(url).query else "?"
     full_url = f"{url}{sep}{urllib.parse.urlencode(params)}"
+    print(f"relay GET {full_url}", file=sys.stderr, flush=True)
     try:
         with urllib.request.urlopen(full_url, timeout=settings.relay.timeout_seconds) as response:
+            print(f"relay <- {response.status}", file=sys.stderr, flush=True)
             return {"sent": 200 <= response.status < 300, "status": response.status}
     except Exception as exc:
+        print(f"relay error: {exc}", file=sys.stderr, flush=True)
         return {"sent": False, "error": str(exc)}
