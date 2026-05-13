@@ -1,7 +1,7 @@
 [project]
 name = "quiz-relay"
 version = "0.1.0"
-description = "Local screenshot quiz solver with AI analysis and configurable HTTP relay"
+description = "Local screenshot quiz solver with AI analysis and HTTP relay"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic",
@@ -9,11 +9,6 @@ dependencies = [
     "openai",
     "pynput",
     "python-dotenv",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest",
 ]
 
 [project.scripts]
@@ -25,7 +20,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]

@@ -1,40 +1,21 @@
-[app]
-name = "Quiz Relay"
-profile = "default"
-runtime_directory = "runtime"
-save_ai_raw_response = true
-allow_parallel_runs = false
-
 [screenshot]
-format = "png"
-delay_ms = 0
 monitor = 1
 
 [ai]
-provider = "openai"
+provider = "openai"          # "openai" or "anthropic"
 model = "gpt-4.1-mini"
 timeout_seconds = 30
 response_language = "de"
 prompt_file = ".prompt"
-openai_image_detail = "auto"
-max_tokens = 1024
 
-[http_relay]
+[relay]
 enabled = false
-url = "http://127.0.0.1:8080/solution"
-mode = "json"
+url = "http://127.0.0.1:8080/vibe"
 timeout_seconds = 2.0
-retries = 2
-
-[http_relay.fields]
-task_id = "context.task_id"
-source = "context.source"
-answers = "solution.answers"
-confidence = "solution.confidence"
-created_at = "meta.created_at"
+on = 120
+off = 80
+pause = 500
+duty = 170
 
 [mouse]
 event = "middle-click"
-
-[logging]
-runs_file = "runtime/logs/runs.jsonl"

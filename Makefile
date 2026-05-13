@@ -4,7 +4,7 @@ PATH := /usr/bin:/bin:$(PATH)
 
 setup:
 	python3 -m venv .venv
-	.venv/bin/python -m pip install -e '.[dev]'
+	.venv/bin/python -m pip install -e .
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +

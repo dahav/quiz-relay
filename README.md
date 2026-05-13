@@ -1,149 +1,38 @@
 # Quiz Relay
 
-Quiz Relay is a small local CLI that runs one direct flow:
+Local CLI that screenshots, asks an AI for the answer, and optionally pings a vibration endpoint.
 
-```text
-trigger -> screenshot -> AI analysis -> validated question data -> optional HTTP relay
+```
+trigger -> screenshot -> AI -> JSON -> HTTP GET
 ```
 
-The internals are intentionally flat. The main modules are:
-
-- `runner.py`: coordinates one run.
-- `capture.py`: captures screenshots with `mss` and lists monitors.
-- `ai.py`: builds the prompt, calls OpenAI or Anthropic, parses and validates the response.
-- `relay.py`: builds and sends the optional HTTP payload.
-- `mouse.py`: listens for mouse events through `pynput`.
-- `models.py`: shared dataclasses.
-- `cli.py`: command-line interface.
-
-## Requirements
-
-- Python 3.11+
-- `make`
-- A desktop session that allows screenshots
-- API key in the environment, for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
-
-Screenshot capture uses `mss`, which supports Linux, macOS, and Windows. Platform permissions still apply. On macOS, screen recording permission may be required. On Windows, desktop capture must be allowed for the running user.
-
-Mouse listening uses `pynput`. Linux Wayland sessions usually block global mouse events, so `listen-mouse` exits with a clear error there. X11, macOS, and Windows are kept as supported targets, subject to OS accessibility/privacy permissions.
-
-## Quickstart
+## Setup
 
 ```bash
-cd /path/to/quiz-relay
 make setup
 cp config.example.toml config.toml
+# put OPENAI_API_KEY or ANTHROPIC_API_KEY in .env
 ```
 
-Run initial checks:
+## Run
 
 ```bash
-.venv/bin/quiz-relay --config config.toml config-check
-.venv/bin/quiz-relay --config config.toml list-monitors
-.venv/bin/quiz-relay --config config.toml test-screenshot
+.venv/bin/quiz-relay solve                 # one cycle
+.venv/bin/quiz-relay listen                # trigger on each mouse event from config
+.venv/bin/quiz-relay listen --event scroll-up
+.venv/bin/quiz-relay listen --scan         # print every detected event
+.venv/bin/quiz-relay listen --list-events  # list supported events
 ```
 
-Run one full cycle:
+## Config
 
-```bash
-.venv/bin/quiz-relay --config config.toml solve --source cli
-```
+`config.toml` next to the CWD, or set `QUIZ_RELAY_CONFIG=/path/to/config.toml`.
 
-## Configuration
+The relay sends a GET request with `on`, `off`, `pause`, `duty` plus either
+`n` (single answer, e.g. `A` -> `1`) or `seq` (multiple answers, e.g. `1,3`).
 
-Example configuration: `config.example.toml`
+## Notes
 
-Sections:
-
-- `[app]`: profile, runtime directory, run lock behavior, raw AI response logging.
-- `[screenshot]`: PNG format, monitor index, optional capture delay.
-- `[ai]`: provider, model, timeout, response language, prompt file.
-- `[http_relay]`: enable flag, URL, mode, timeout, retries.
-- `[http_relay.fields]`: optional outgoing payload mapping.
-- `[mouse]`: default mouse event.
-- `[logging]`: JSONL run log path.
-
-Configuration can be selected with `--config /path/to/config.toml` or `QUIZ_RELAY_CONFIG`. If neither is set, the CLI automatically uses `./config.toml` when it exists. The profile can be selected with `--profile` or `QUIZ_RELAY_PROFILE`.
-
-## Commands
-
-```bash
-quiz-relay config-check
-quiz-relay doctor
-quiz-relay list-monitors
-quiz-relay test-screenshot
-quiz-relay solve --source cli
-quiz-relay solve --source shortcut
-quiz-relay solve --test-image /path/to/image.png --no-relay
-quiz-relay listen-mouse --list-events
-quiz-relay listen-mouse --scan
-quiz-relay listen-mouse --event middle-click
-quiz-relay test-relay --source test
-quiz-relay parse-response /path/to/response.txt
-```
-
-## HTTP Relay
-
-`[http_relay].mode` controls transport:
-
-- `json`: send a POST request with a JSON body.
-- `query`: send a GET request with mapped values as query parameters.
-
-Configure `[http_relay.fields]` to map outgoing field names to expressions such as
-`context.task_id`, `solution.answers`, `solution.answers_text`, `solution.explanation`,
-`solution.confidence`, `solution.vibe_n`, or `solution.vibe_seq`.
-
-`solution.answers` includes the selected answer identifiers and, when returned by the
-AI provider, the visible question text plus all visible answer options:
-
-```json
-[
-  {
-    "question": 1,
-    "answers": ["A"],
-    "question_text": "Which option is correct?",
-    "options": [
-      {"id": "A", "text": "First option"},
-      {"id": "B", "text": "Second option"}
-    ]
-  }
-]
-```
-
-`solution.vibe_n` maps a single selected answer to a pulse count for vibration
-endpoints: `A` or `1` becomes `1`, `B` or `2` becomes `2`, and so on through
-`I` or `9`. `solution.vibe_seq` emits a comma-separated sequence when multiple
-answers are selected.
-
-## Runtime Data
-
-Default paths:
-
-- Screenshots: `runtime/screenshots/`
-- Run log: `runtime/logs/runs.jsonl`
-- Lock file while a run is active: `runtime/quiz-relay.lock`
-
-If the application was terminated while a run was active, the next run removes a stale local lock automatically.
-
-Run log timestamps use the local system timezone and include the UTC offset, for example `2026-05-07T16:33:26.381+02:00`.
-
-## Development
-
-```bash
-make setup
-.venv/bin/python -m pytest
-```
-
-Run one focused test:
-
-```bash
-.venv/bin/python -m pytest tests/test_mouse_listener.py
-```
-
-`make clean` removes Python cache files, test/build artifacts, egg-info directories, coverage output, and `runtime/`.
-
-## Additional Docs
-
-- `docs/gnome_shortcut.md`
-- `docs/http_relay.md`
-- `spec.md`
+- Screenshot capture uses `mss`. macOS may require screen-recording permission.
+- Mouse listening uses `pynput`. Wayland blocks global mouse events; X11/macOS/Windows work.
+- Screenshots land in `runtime/screenshots/`.
