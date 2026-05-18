@@ -10,6 +10,7 @@ from quiz_relay.config import Settings, load_settings
 from quiz_relay.core import available_modes, load_mode, solve
 from quiz_relay.mouse import SUPPORTED_EVENTS, MouseEvent, listen_for_mouse_event
 from quiz_relay.relays import available_relays, build_relay
+from quiz_relay.relays.keyboard_led import scan_keyboard_leds
 from quiz_relay.solution import answers_to_pulses
 
 RELAY_TEST_PULSES: list[int] = [3]
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("modes", help="List available prompt modes")
     sub.add_parser("relays", help="List available relay modules")
+    sub.add_parser("scan-leds", help="List keyboard LED devices for [relay.keyboard_led].")
 
     relay_test = sub.add_parser(
         "relay-test",
@@ -113,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_modes(args)
     if args.command == "relays":
         return _cmd_relays()
+    if args.command == "scan-leds":
+        return _cmd_scan_leds()
     if args.command == "relay-test":
         return _cmd_relay_test(args)
     return 1
@@ -173,6 +177,39 @@ def _cmd_relays() -> int:
         return 1
     for name in relays:
         print(name)
+    return 0
+
+
+def _cmd_scan_leds() -> int:
+    devices = scan_keyboard_leds()
+    if not devices:
+        print("No keyboard lock LEDs found under /sys/class/leds.", file=sys.stderr)
+        return 1
+
+    print("Keyboard lock LEDs:")
+    device_width = max(len("device"), *(len(d.device) for d in devices))
+    lock_width = max(len("lock"), *(len(d.lock) for d in devices))
+    writable_width = len("writable")
+    header = (
+        f"{'device':<{device_width}}  "
+        f"{'lock':<{lock_width}}  "
+        f"{'writable':<{writable_width}}  "
+        "brightness"
+    )
+    print(header)
+    print("-" * len(header))
+    for device in devices:
+        writable = "yes" if device.writable else "no"
+        brightness = f"{device.brightness}/{device.max_brightness}"
+        print(
+            f"{device.device:<{device_width}}  "
+            f"{device.lock:<{lock_width}}  "
+            f"{writable:<{writable_width}}  "
+            f"{brightness}"
+        )
+        print(f"  config: device = \"{device.device}\"")
+        print(f"  path:   {device.brightness_path}")
+        print(f"  target: {device.target_path}")
     return 0
 
 

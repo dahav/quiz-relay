@@ -24,7 +24,7 @@ pause = 800
 duty = 170
 
 [relay.keyboard_led]
-device = "input3::capslock"   # name under /sys/class/leds/
+device = ""                   # required: run `quiz-relay scan-leds` and paste a device
 on = 300                      # LED on duration (ms) — matches [relay.http]
 off = 200                     # gap between pulses within one answer (ms)
 pause = 800                   # gap between answers (ms)

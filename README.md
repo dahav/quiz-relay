@@ -27,6 +27,7 @@ cp config.example.toml config.toml
 .venv/bin/quiz-relay listen --list-events  # list supported events
 .venv/bin/quiz-relay modes                 # list available prompt modes
 .venv/bin/quiz-relay relays                # list available relay modules
+.venv/bin/quiz-relay scan-leds             # list keyboard LED device names
 .venv/bin/quiz-relay --config /path/to/config.toml modes
 ```
 
@@ -67,7 +68,8 @@ Built-in relays:
   (answer pulses, e.g. `A,C` -> `1,3`).
 - `keyboard_led`: blinks a lock LED under `/sys/class/leds/<device>/`. The
   number of pulses encodes the answer (`A` / `1` -> 1 pulse, `B` / `2` -> 2,
-  …). Multiple answers are separated by `pause`.
+  …). Multiple answers are separated by `pause`. This relay requires an
+  explicit `device` value in `config.toml`.
 
 Both relays share the same timing keys (`on`, `off`, `pause` in ms) so the
 LED blink cadence matches what the HTTP endpoint plays. Keep the values
@@ -118,14 +120,35 @@ Notes:
   `sudo chgrp input /sys/class/leds/input*::*lock/brightness && sudo chmod 0664 /sys/class/leds/input*::*lock/brightness`.
   The udev rule then takes over from the next boot.
 
-Pick a device that exists on your system:
+### Keyboard LED device selection
+
+There is no automatic LED selection. The `inputN` prefix is assigned by the
+kernel and can vary between machines and boots. Scan the available lock LEDs
+first:
 
 ```bash
-ls /sys/class/leds/
+.venv/bin/quiz-relay scan-leds
 ```
 
-Common candidates: `input3::capslock`, `input3::scrolllock`,
-`input3::numlock` (the `inputN` prefix varies per kernel boot).
+The output includes copyable config lines:
+
+```text
+config: device = "input4::capslock"
+```
+
+Paste one of those values into `[relay.keyboard_led]`:
+
+```toml
+[relay.keyboard_led]
+device = "input4::capslock"
+on = 300
+off = 200
+pause = 800
+max_pulses = 9
+```
+
+If the relay reports `LED device not found`, run `scan-leds` again and update
+the configured device.
 
 Smoke-test the wiring without solving anything:
 
