@@ -21,12 +21,13 @@ cp config.example.toml config.toml
 .venv/bin/quiz-relay solve --mode istqb --image temp/sample.png   # skip screenshot, use file
 .venv/bin/quiz-relay solve --mode istqb --relay http
 .venv/bin/quiz-relay solve --mode istqb --relay http --relay keyboard_led
-.venv/bin/quiz-relay listen --mode iso27001 --relay keyboard_led
+.venv/bin/quiz-relay listen --mode togaf --relay keyboard_led
 .venv/bin/quiz-relay listen --mode istqb --event scroll-up
 .venv/bin/quiz-relay listen --scan         # show every detected event
 .venv/bin/quiz-relay listen --list-events  # list supported events
 .venv/bin/quiz-relay modes                 # list available prompt modes
 .venv/bin/quiz-relay relays                # list available relay modules
+.venv/bin/quiz-relay --config /path/to/config.toml modes
 ```
 
 `--mode` is required. `--relay` is optional and may be repeated.
@@ -49,21 +50,21 @@ via `--mode`.
 
 ## Config
 
-`config.toml` next to the CWD, or pass `--config /path/to/config.toml`.
+`config.toml` next to the CWD, or pass `--config /path/to/config.toml`
+before the subcommand.
 
 ## Relays
 
-Relay modules live in `src/quiz_relay/relays/`. Each `.py` file in that
-directory that defines a `Relay` subclass with a `name` is auto-discovered.
-Add a new module by dropping a file in there — no other code change needed.
+Relay modules live in `src/quiz_relay/relays/` and are registered in
+`src/quiz_relay/relays/__init__.py`.
 
 Selection happens on the command line with `--relay <name>` (repeat for
 multiple). Each module reads its own `[relay.<name>]` TOML section.
 
-Built-in modules:
+Built-in relays:
 
-- `http`: GET to a URL with `on`, `off`, `pause`, `duty` plus either `n`
-  (single answer, e.g. `A` -> `1`) or `seq` (multiple answers, e.g. `1,3`).
+- `http`: GET to a URL with `on`, `off`, `pause`, `duty` and `seq`
+  (answer pulses, e.g. `A,C` -> `1,3`).
 - `keyboard_led`: blinks a lock LED under `/sys/class/leds/<device>/`. The
   number of pulses encodes the answer (`A` / `1` -> 1 pulse, `B` / `2` -> 2,
   …). Multiple answers are separated by `pause`.
