@@ -8,10 +8,6 @@ from typing import Any
 class Solution:
     raw: dict[str, Any]
 
-    @classmethod
-    def from_raw(cls, data: dict[str, Any]) -> "Solution":
-        return cls(raw=data)
-
     def to_dict(self) -> dict[str, Any]:
         return self.raw
 

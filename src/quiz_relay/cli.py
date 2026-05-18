@@ -85,6 +85,24 @@ def _dispatch_relays(names: list[str], settings: Settings, pulses: list[int]) ->
     return results
 
 
+def _run_once(
+    settings: Settings,
+    mode: str,
+    relay_names: list[str],
+    image: Path | None = None,
+    event: MouseEvent | None = None,
+) -> dict[str, Any]:
+    solution, source, source_key = solve(settings, mode, image=image)
+    pulses = answers_to_pulses(solution.all_answer_ids)
+    relay_results = _dispatch_relays(relay_names, settings, pulses)
+    report: dict[str, Any] = {"mode": mode, source_key: str(source), "solution": solution.to_dict()}
+    if event is not None:
+        report = {"event": event.name, **report}
+    if relay_results:
+        report["relays"] = relay_results
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "solve":
@@ -104,12 +122,7 @@ def _cmd_solve(args: argparse.Namespace) -> int:
     settings = load_settings(_config_path(args))
     image = Path(args.image).expanduser() if args.image else None
     mode = _require_mode(args)
-    solution, source, source_key = solve(settings, mode, image=image)
-    pulses = answers_to_pulses(solution.all_answer_ids)
-    relay_results = _dispatch_relays(args.relay, settings, pulses)
-    report = {"mode": mode, source_key: str(source), "solution": solution.to_dict()}
-    if relay_results:
-        report["relays"] = relay_results
+    report = _run_once(settings, mode, args.relay, image=image)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
@@ -133,14 +146,7 @@ def _cmd_listen(args: argparse.Namespace) -> int:
     relay_names: list[str] = args.relay
 
     def on_event(event: MouseEvent) -> None:
-        solution, source, source_key = solve(settings, mode)
-        pulses = answers_to_pulses(solution.all_answer_ids)
-        relay_results = _dispatch_relays(relay_names, settings, pulses)
-        report: dict[str, Any] = {
-            "event": event.name, "mode": mode, source_key: str(source), "solution": solution.to_dict(),
-        }
-        if relay_results:
-            report["relays"] = relay_results
+        report = _run_once(settings, mode, relay_names, event=event)
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 
     relay_hint = ",".join(relay_names) if relay_names else "(none)"

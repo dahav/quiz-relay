@@ -20,7 +20,7 @@ IMAGE_MIME_TYPES = {
 }
 
 DEFAULT_PROMPT = """Analyze the provided image.
-Look for one or more multiple-choice questions.
+Look for exactly one multiple-choice question.
 
 Return only valid JSON in this schema:
 
@@ -157,8 +157,12 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     return client.responses.create(**kwargs).output_text.strip()
 
 
+def _strip_json_fence(text: str) -> str:
+    return text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+
 def parse_response(text: str) -> Solution:
-    stripped = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    stripped = _strip_json_fence(text)
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
@@ -170,4 +174,4 @@ def parse_response(text: str) -> Solution:
         raise SystemExit("AI response missing answers array.")
     if not data["answers"]:
         raise SystemExit(f"AI found no question: {data.get('explanation') or 'no question visible'}")
-    return Solution.from_raw(data)
+    return Solution(raw=data)
