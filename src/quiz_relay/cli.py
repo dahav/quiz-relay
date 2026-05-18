@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from quiz_relay.config import Settings, load_settings
-from quiz_relay.core import available_modes, solve, validate_mode
+from quiz_relay.core import available_modes, load_mode, solve
 from quiz_relay.mouse import SUPPORTED_EVENTS, MouseEvent, listen_for_mouse_event
 from quiz_relay.relays import available_relays, build_relay
-from quiz_relay.solution import Solution, answers_to_pulses
+from quiz_relay.solution import answers_to_pulses
 
 RELAY_TEST_PULSES: list[int] = [3]
 
@@ -85,23 +85,6 @@ def _dispatch_relays(names: list[str], settings: Settings, pulses: list[int]) ->
     return results
 
 
-def _report(
-    solution: Solution,
-    source: Path,
-    source_key: str,
-    mode: str,
-    relay_results: dict[str, Any],
-) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "mode": mode,
-        source_key: str(source),
-        "solution": solution.to_dict(),
-    }
-    if relay_results:
-        out["relays"] = relay_results
-    return out
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "solve":
@@ -124,7 +107,10 @@ def _cmd_solve(args: argparse.Namespace) -> int:
     solution, source, source_key = solve(settings, mode, image=image)
     pulses = answers_to_pulses(solution.all_answer_ids)
     relay_results = _dispatch_relays(args.relay, settings, pulses)
-    print(json.dumps(_report(solution, source, source_key, mode, relay_results), ensure_ascii=False, indent=2))
+    report = {"mode": mode, source_key: str(source), "solution": solution.to_dict()}
+    if relay_results:
+        report["relays"] = relay_results
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -142,7 +128,7 @@ def _cmd_listen(args: argparse.Namespace) -> int:
         return 0
 
     mode = _require_mode(args)
-    validate_mode(settings.prompts_dir, mode)
+    load_mode(settings.prompts_dir, mode)
     event_name = args.event or settings.mouse_event
     relay_names: list[str] = args.relay
 
@@ -150,8 +136,12 @@ def _cmd_listen(args: argparse.Namespace) -> int:
         solution, source, source_key = solve(settings, mode)
         pulses = answers_to_pulses(solution.all_answer_ids)
         relay_results = _dispatch_relays(relay_names, settings, pulses)
-        report = _report(solution, source, source_key, mode, relay_results)
-        print(json.dumps({"event": event.name, **report}, ensure_ascii=False, indent=2), flush=True)
+        report: dict[str, Any] = {
+            "event": event.name, "mode": mode, source_key: str(source), "solution": solution.to_dict(),
+        }
+        if relay_results:
+            report["relays"] = relay_results
+        print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 
     relay_hint = ",".join(relay_names) if relay_names else "(none)"
     print(f"Listening for {event_name} (mode={mode}, relays={relay_hint})", flush=True)

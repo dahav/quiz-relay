@@ -44,11 +44,8 @@ class HttpRelay(Relay):
             "off": str(self.off),
             "pause": str(self.pause),
             "duty": str(self.duty),
+            "seq": ",".join(str(p) for p in pulses[:8]),
         }
-        if len(pulses) == 1:
-            params["n"] = str(pulses[0])
-        else:
-            params["seq"] = ",".join(str(p) for p in pulses[:8])
 
         sep = "&" if urllib.parse.urlparse(self.url).query else "?"
         full_url = f"{self.url}{sep}{urllib.parse.urlencode(params)}"

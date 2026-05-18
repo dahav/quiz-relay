@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from quiz_relay.config import Settings
 from quiz_relay.solution import Solution
-
-FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.IGNORECASE)
 
 BASE_MODE = "multiplechoice"
 
@@ -60,51 +57,31 @@ Rules:
 
 
 def solve(settings: Settings, mode: str, image: Path | None = None) -> tuple[Solution, Path, str]:
-    _load_mode(settings.prompts_dir, mode)
+    load_mode(settings.prompts_dir, mode)
     if image is not None:
-        source = _validate_image(image)
-        source_key = "image"
+        if not image.is_file():
+            raise SystemExit(f"Image file not found: {image}")
+        if image.suffix.lower() not in IMAGE_MIME_TYPES:
+            supported = ", ".join(sorted(IMAGE_MIME_TYPES))
+            raise SystemExit(f"Unsupported image format '{image.suffix}'. Supported: {supported}")
+        source, source_key = image, "image"
     else:
-        source = capture_screenshot(settings)
-        source_key = "screenshot"
-    raw = ask_ai(source, settings, mode)
-    solution = parse_response(raw)
-    return solution, source, source_key
-
-
-def _validate_image(path: Path) -> Path:
-    if not path.is_file():
-        raise SystemExit(f"Image file not found: {path}")
-    if path.suffix.lower() not in IMAGE_MIME_TYPES:
-        supported = ", ".join(sorted(IMAGE_MIME_TYPES))
-        raise SystemExit(f"Unsupported image format '{path.suffix}'. Supported: {supported}")
-    return path
-
-
-def _display_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(Path.cwd()))
-    except ValueError:
-        return str(path)
+        source, source_key = capture_screenshot(settings), "screenshot"
+    return parse_response(ask_ai(source, settings, mode)), source, source_key
 
 
 def available_modes(prompts_dir: Path) -> list[str]:
     if not prompts_dir.is_dir():
         return []
-    return sorted(path.stem for path in prompts_dir.glob("*.md") if path.stem != BASE_MODE)
+    return sorted(p.stem for p in prompts_dir.glob("*.md") if p.stem != BASE_MODE)
 
 
-def validate_mode(prompts_dir: Path, mode: str) -> None:
-    _load_mode(prompts_dir, mode)
-
-
-def _load_mode(prompts_dir: Path, mode: str) -> str:
+def load_mode(prompts_dir: Path, mode: str) -> str:
     if mode == BASE_MODE:
         raise SystemExit(f"'{BASE_MODE}' is the common base and cannot be used as a mode.")
     path = prompts_dir / f"{mode}.md"
     if not path.is_file():
-        available = available_modes(prompts_dir)
-        hint = ", ".join(available) if available else "(none)"
+        hint = ", ".join(available_modes(prompts_dir)) or "(none)"
         raise SystemExit(f"Unknown mode '{mode}'. Available: {hint}")
     text = path.read_text(encoding="utf-8").strip()
     if not text:
@@ -126,23 +103,19 @@ def capture_screenshot(settings: Settings) -> Path:
         if idx < 1 or idx >= len(monitors):
             raise SystemExit(f"Monitor {idx} is not available.")
         shot = sct.grab(monitors[idx])
-        _ensure_screenshot_has_content(shot.rgb)
+        sample = bytes(shot.rgb)[:: max(1, len(shot.rgb) // 5000)]
+        if max(sample) - min(sample) < 10:
+            raise SystemExit(
+                "Screenshot appears empty (near-uniform color). "
+                "On Wayland, mss often returns a black image. Switch to an X11 session."
+            )
         mss.tools.to_png(shot.rgb, shot.size, output=str(out))
     return out
 
 
-def _ensure_screenshot_has_content(rgb: bytes) -> None:
-    sample = bytes(rgb)[:: max(1, len(rgb) // 5000)]
-    if max(sample) - min(sample) < 10:
-        raise SystemExit(
-            "Screenshot appears empty (near-uniform color). "
-            "On Wayland, mss often returns a black image. Switch to an X11 session."
-        )
-
-
 def build_prompt(settings: Settings, mode: str) -> str:
     base = DEFAULT_PROMPT.format(language=settings.ai_response_language)
-    extra = _load_mode(settings.prompts_dir, mode)
+    extra = load_mode(settings.prompts_dir, mode)
     common_path = settings.prompts_dir / f"{BASE_MODE}.md"
     common = common_path.read_text(encoding="utf-8").strip() if common_path.is_file() else ""
     sections = [base, f"Mode: {mode}"]
@@ -163,7 +136,7 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     parts = [f"model={settings.ai_model}", f"mode={mode}"]
     if settings.ai_reasoning_effort:
         parts.append(f"effort={settings.ai_reasoning_effort}")
-    parts.append(f"image={_display_path(image_path)}")
+    parts.append(f"image={image_path}")
     print(f"calling AI... ({', '.join(parts)})", file=sys.stderr, flush=True)
 
     client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_timeout_seconds)
@@ -181,30 +154,20 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     }
     if settings.ai_reasoning_effort:
         kwargs["reasoning"] = {"effort": settings.ai_reasoning_effort}
-    response = client.responses.create(**kwargs)
-    return response.output_text.strip()
+    return client.responses.create(**kwargs).output_text.strip()
 
 
 def parse_response(text: str) -> Solution:
-    payload = _extract_json(text)
+    stripped = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
-        data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"AI response does not contain valid JSON: {exc}")
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        start, end = stripped.find("{"), stripped.rfind("}")
+        if start == -1 or end < start:
+            raise SystemExit("AI response does not contain a JSON object.")
+        data = json.loads(stripped[start : end + 1])
     if not isinstance(data, dict) or not isinstance(data.get("answers"), list):
         raise SystemExit("AI response missing answers array.")
     if not data["answers"]:
-        explanation = data.get("explanation") or "no question visible"
-        raise SystemExit(f"AI found no question: {explanation}")
+        raise SystemExit(f"AI found no question: {data.get('explanation') or 'no question visible'}")
     return Solution.from_raw(data)
-
-
-def _extract_json(text: str) -> str:
-    stripped = text.strip()
-    fence = FENCED_JSON_RE.search(stripped)
-    if fence:
-        return fence.group(1).strip()
-    start, end = stripped.find("{"), stripped.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise SystemExit("AI response does not contain a JSON object.")
-    return stripped[start : end + 1]
