@@ -4,12 +4,11 @@ import base64
 import json
 import re
 import sys
-import urllib.parse
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from quiz_relay.config import Settings
+from quiz_relay.solution import Solution
 
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.IGNORECASE)
 
@@ -22,8 +21,6 @@ IMAGE_MIME_TYPES = {
     ".webp": "image/webp",
     ".gif": "image/gif",
 }
-
-VIBE_PULSE = {letter: i for i, letter in enumerate("ABCDEFGHI", 1)} | {str(i): i for i in range(1, 10)}
 
 DEFAULT_PROMPT = """Analyze the provided image.
 Look for one or more multiple-choice questions.
@@ -62,7 +59,7 @@ Rules:
 """
 
 
-def solve(settings: Settings, mode: str, image: Path | None = None) -> dict:
+def solve(settings: Settings, mode: str, image: Path | None = None) -> tuple[Solution, Path, str]:
     _load_mode(settings.prompts.dir, mode)
     if image is not None:
         source = _validate_image(image)
@@ -72,10 +69,7 @@ def solve(settings: Settings, mode: str, image: Path | None = None) -> dict:
         source_key = "screenshot"
     raw = ask_ai(source, settings, mode)
     solution = parse_response(raw)
-    result: dict = {"mode": mode, source_key: str(source), "solution": solution}
-    if settings.relay.enabled:
-        result["relay"] = send_relay(settings, solution)
-    return result
+    return solution, source, source_key
 
 
 def _validate_image(path: Path) -> Path:
@@ -224,7 +218,7 @@ def _ask_anthropic(prompt: str, image_b64: str, mime: str, settings: Settings) -
     return "\n".join(b.text for b in message.content if getattr(b, "type", None) == "text").strip()
 
 
-def parse_response(text: str) -> dict:
+def parse_response(text: str) -> Solution:
     payload = _extract_json(text)
     try:
         data = json.loads(payload)
@@ -235,10 +229,7 @@ def parse_response(text: str) -> dict:
     if not data["answers"]:
         explanation = data.get("explanation") or "no question visible"
         raise SystemExit(f"AI found no question: {explanation}")
-    for item in data["answers"]:
-        if isinstance(item, dict) and isinstance(item.get("answers"), list):
-            item["answers"] = [a.strip().upper() for a in item["answers"] if isinstance(a, str)]
-    return data
+    return Solution.from_raw(data)
 
 
 def _extract_json(text: str) -> str:
@@ -250,30 +241,3 @@ def _extract_json(text: str) -> str:
     if start == -1 or end == -1 or end < start:
         raise SystemExit("AI response does not contain a JSON object.")
     return stripped[start : end + 1]
-
-
-def send_relay(settings: Settings, solution: dict) -> dict:
-    letters = [a for item in solution.get("answers", []) if isinstance(item, dict) for a in item.get("answers", [])]
-    pulses = [str(VIBE_PULSE[a]) for a in letters if a in VIBE_PULSE]
-    params: dict[str, str] = {
-        "on": str(settings.relay.on),
-        "off": str(settings.relay.off),
-        "pause": str(settings.relay.pause),
-        "duty": str(settings.relay.duty),
-    }
-    if len(pulses) == 1:
-        params["n"] = pulses[0]
-    elif len(pulses) > 1:
-        params["seq"] = ",".join(pulses[:8])
-
-    url = settings.relay.url
-    sep = "&" if urllib.parse.urlparse(url).query else "?"
-    full_url = f"{url}{sep}{urllib.parse.urlencode(params)}"
-    print(f"relay GET {full_url}", file=sys.stderr, flush=True)
-    try:
-        with urllib.request.urlopen(full_url, timeout=settings.relay.timeout_seconds) as response:
-            print(f"relay <- {response.status}", file=sys.stderr, flush=True)
-            return {"sent": 200 <= response.status < 300, "status": response.status}
-    except Exception as exc:
-        print(f"relay error: {exc}", file=sys.stderr, flush=True)
-        return {"sent": False, "error": str(exc)}

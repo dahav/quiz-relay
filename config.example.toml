@@ -10,14 +10,24 @@ response_language = "de"
 openai_api_key = ""          # required when provider = "openai"
 anthropic_api_key = ""       # required when provider = "anthropic"
 
-[relay]
-enabled = false
-url = "http://127.0.0.1:8080/vibe"
-timeout_seconds = 2.0
-on = 120
-off = 80
-pause = 500
-duty = 170
-
 [mouse]
 event = "middle-click"
+
+# Relay modules. Each [relay.<name>] section is read by the matching module
+# when --relay <name> is passed on the command line. Repeat --relay to use
+# several modules in one run.
+
+[relay.http]
+url = "http://127.0.0.1:8080/vibe"
+timeout_seconds = 2.0
+on = 300
+off = 200
+pause = 800
+duty = 170
+
+[relay.keyboard_led]
+device = "input3::capslock"   # name under /sys/class/leds/
+on = 300                      # LED on duration (ms) — matches [relay.http]
+off = 200                     # gap between pulses within one answer (ms)
+pause = 800                   # gap between answers (ms)
+max_pulses = 9

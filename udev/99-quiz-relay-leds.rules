@@ -1,0 +1,14 @@
+# Allow members of the 'input' group to control keyboard lock LEDs.
+# Install: sudo cp udev/99-quiz-relay-leds.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=leds
+#          sudo usermod -aG input "$USER"   # then log out + back in
+#
+# Note: For the 'leds' subsystem, GROUP=/MODE= alone does NOT propagate to
+# the sysfs 'brightness' attribute, so we chgrp/chmod it explicitly via RUN+=.
+
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="input*::capslock", \
+    RUN+="/bin/sh -c 'chgrp input /sys%p/brightness && chmod 0664 /sys%p/brightness'"
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="input*::numlock", \
+    RUN+="/bin/sh -c 'chgrp input /sys%p/brightness && chmod 0664 /sys%p/brightness'"
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="input*::scrolllock", \
+    RUN+="/bin/sh -c 'chgrp input /sys%p/brightness && chmod 0664 /sys%p/brightness'"

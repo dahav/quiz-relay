@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,17 +28,6 @@ class PromptsConfig:
 
 
 @dataclass(frozen=True)
-class RelayConfig:
-    enabled: bool = False
-    url: str = "http://127.0.0.1:8080/solution"
-    timeout_seconds: float = 2.0
-    on: int = 120
-    off: int = 80
-    pause: int = 500
-    duty: int = 170
-
-
-@dataclass(frozen=True)
 class MouseConfig:
     event: str = "middle-click"
 
@@ -47,9 +36,9 @@ class MouseConfig:
 class Settings:
     screenshot: ScreenshotConfig
     ai: AiConfig
-    relay: RelayConfig
     mouse: MouseConfig
     prompts: PromptsConfig
+    relays: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -61,9 +50,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
     return Settings(
         screenshot=_screenshot(data.get("screenshot", {})),
         ai=_ai(data.get("ai", {})),
-        relay=_relay(data.get("relay", {})),
         mouse=_mouse(data.get("mouse", {})),
         prompts=_prompts(data.get("prompts", {})),
+        relays=_relays(data.get("relay", {})),
     )
 
 
@@ -90,16 +79,8 @@ def _prompts(data: dict) -> PromptsConfig:
     return PromptsConfig(dir=Path(data.get("dir", "prompts")).expanduser())
 
 
-def _relay(data: dict) -> RelayConfig:
-    return RelayConfig(
-        enabled=bool(data.get("enabled", False)),
-        url=str(data.get("url", "http://127.0.0.1:8080/solution")),
-        timeout_seconds=float(data.get("timeout_seconds", 2.0)),
-        on=int(data.get("on", 120)),
-        off=int(data.get("off", 80)),
-        pause=int(data.get("pause", 500)),
-        duty=int(data.get("duty", 170)),
-    )
+def _relays(data: dict) -> dict[str, dict[str, Any]]:
+    return {name: dict(section) for name, section in data.items() if isinstance(section, dict)}
 
 
 def _mouse(data: dict) -> MouseConfig:
