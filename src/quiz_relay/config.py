@@ -7,37 +7,15 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class ScreenshotConfig:
-    monitor: int = 1
-
-
-@dataclass(frozen=True)
-class AiConfig:
-    provider: str = "openai"
-    model: str = "gpt-4.1-mini"
-    reasoning_effort: str | None = None
-    timeout_seconds: float = 30.0
-    response_language: str = "de"
-    openai_api_key: str | None = None
-    anthropic_api_key: str | None = None
-
-
-@dataclass(frozen=True)
-class PromptsConfig:
-    dir: Path = Path("prompts")
-
-
-@dataclass(frozen=True)
-class MouseConfig:
-    event: str = "middle-click"
-
-
-@dataclass(frozen=True)
 class Settings:
-    screenshot: ScreenshotConfig
-    ai: AiConfig
-    mouse: MouseConfig
-    prompts: PromptsConfig
+    monitor: int = 1
+    ai_model: str = "gpt-4.1-mini"
+    ai_reasoning_effort: str | None = None
+    ai_timeout_seconds: float = 30.0
+    ai_response_language: str = "de"
+    openai_api_key: str | None = None
+    mouse_event: str = "middle-click"
+    prompts_dir: Path = Path("prompts")
     relays: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -47,41 +25,22 @@ def load_settings(config_path: Path | None = None) -> Settings:
         raise SystemExit(f"Configuration file not found: {path}")
     data: dict[str, Any] = tomllib.loads(path.read_text(encoding="utf-8"))
 
+    screenshot = data.get("screenshot", {})
+    ai = data.get("ai", {})
+    mouse = data.get("mouse", {})
+    prompts = data.get("prompts", {})
+    effort = ai.get("reasoning_effort")
+    openai_key = ai.get("openai_api_key")
+    relays = {name: dict(s) for name, s in data.get("relay", {}).items() if isinstance(s, dict)}
+
     return Settings(
-        screenshot=_screenshot(data.get("screenshot", {})),
-        ai=_ai(data.get("ai", {})),
-        mouse=_mouse(data.get("mouse", {})),
-        prompts=_prompts(data.get("prompts", {})),
-        relays=_relays(data.get("relay", {})),
-    )
-
-
-def _screenshot(data: dict) -> ScreenshotConfig:
-    return ScreenshotConfig(monitor=int(data.get("monitor", 1)))
-
-
-def _ai(data: dict) -> AiConfig:
-    effort = data.get("reasoning_effort")
-    openai_key = data.get("openai_api_key")
-    anthropic_key = data.get("anthropic_api_key")
-    return AiConfig(
-        provider=str(data.get("provider", "openai")).lower(),
-        model=str(data.get("model", "gpt-4.1-mini")),
-        reasoning_effort=str(effort).lower() if effort else None,
-        timeout_seconds=float(data.get("timeout_seconds", 30.0)),
-        response_language=str(data.get("response_language", "de")),
+        monitor=int(screenshot.get("monitor", 1)),
+        ai_model=str(ai.get("model", "gpt-4.1-mini")),
+        ai_reasoning_effort=str(effort).lower() if effort else None,
+        ai_timeout_seconds=float(ai.get("timeout_seconds", 30.0)),
+        ai_response_language=str(ai.get("response_language", "de")),
         openai_api_key=str(openai_key) if openai_key else None,
-        anthropic_api_key=str(anthropic_key) if anthropic_key else None,
+        mouse_event=str(mouse.get("event", "middle-click")),
+        prompts_dir=Path(prompts.get("dir", "prompts")).expanduser(),
+        relays=relays,
     )
-
-
-def _prompts(data: dict) -> PromptsConfig:
-    return PromptsConfig(dir=Path(data.get("dir", "prompts")).expanduser())
-
-
-def _relays(data: dict) -> dict[str, dict[str, Any]]:
-    return {name: dict(section) for name, section in data.items() if isinstance(section, dict)}
-
-
-def _mouse(data: dict) -> MouseConfig:
-    return MouseConfig(event=str(data.get("event", "middle-click")))

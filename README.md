@@ -11,7 +11,7 @@ trigger -> screenshot -> AI (per mode) -> Solution -> relay module(s)
 ```bash
 make setup
 cp config.example.toml config.toml
-# set openai_api_key (or anthropic_api_key) in config.toml [ai]
+# set openai_api_key in config.toml [ai]
 ```
 
 ## Run

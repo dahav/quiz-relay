@@ -60,7 +60,7 @@ Rules:
 
 
 def solve(settings: Settings, mode: str, image: Path | None = None) -> tuple[Solution, Path, str]:
-    _load_mode(settings.prompts.dir, mode)
+    _load_mode(settings.prompts_dir, mode)
     if image is not None:
         source = _validate_image(image)
         source_key = "image"
@@ -122,7 +122,7 @@ def capture_screenshot(settings: Settings) -> Path:
 
     with mss.MSS() as sct:
         monitors = sct.monitors
-        idx = settings.screenshot.monitor
+        idx = settings.monitor
         if idx < 1 or idx >= len(monitors):
             raise SystemExit(f"Monitor {idx} is not available.")
         shot = sct.grab(monitors[idx])
@@ -141,9 +141,9 @@ def _ensure_screenshot_has_content(rgb: bytes) -> None:
 
 
 def build_prompt(settings: Settings, mode: str) -> str:
-    base = DEFAULT_PROMPT.format(language=settings.ai.response_language)
-    extra = _load_mode(settings.prompts.dir, mode)
-    common_path = settings.prompts.dir / f"{BASE_MODE}.md"
+    base = DEFAULT_PROMPT.format(language=settings.ai_response_language)
+    extra = _load_mode(settings.prompts_dir, mode)
+    common_path = settings.prompts_dir / f"{BASE_MODE}.md"
     common = common_path.read_text(encoding="utf-8").strip() if common_path.is_file() else ""
     sections = [base, f"Mode: {mode}"]
     if common:
@@ -153,30 +153,22 @@ def build_prompt(settings: Settings, mode: str) -> str:
 
 
 def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
+    from openai import OpenAI
+
+    if not settings.openai_api_key:
+        raise SystemExit("openai_api_key is not set in config.toml ([ai] section).")
     prompt = build_prompt(settings, mode)
     image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     mime = IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/png")
-    provider = settings.ai.provider
-    parts = [f"provider={provider}", f"model={settings.ai.model}", f"mode={mode}"]
-    if settings.ai.reasoning_effort:
-        parts.append(f"effort={settings.ai.reasoning_effort}")
+    parts = [f"model={settings.ai_model}", f"mode={mode}"]
+    if settings.ai_reasoning_effort:
+        parts.append(f"effort={settings.ai_reasoning_effort}")
     parts.append(f"image={_display_path(image_path)}")
     print(f"calling AI... ({', '.join(parts)})", file=sys.stderr, flush=True)
-    if provider in {"openai", "chatgpt"}:
-        return _ask_openai(prompt, image_b64, mime, settings)
-    if provider in {"anthropic", "claude"}:
-        return _ask_anthropic(prompt, image_b64, mime, settings)
-    raise SystemExit(f"Unknown AI provider: {provider}")
 
-
-def _ask_openai(prompt: str, image_b64: str, mime: str, settings: Settings) -> str:
-    from openai import OpenAI
-
-    if not settings.ai.openai_api_key:
-        raise SystemExit("openai_api_key is not set in config.toml ([ai] section).")
-    client = OpenAI(api_key=settings.ai.openai_api_key, timeout=settings.ai.timeout_seconds)
+    client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_timeout_seconds)
     kwargs: dict = {
-        "model": settings.ai.model,
+        "model": settings.ai_model,
         "input": [
             {
                 "role": "user",
@@ -187,35 +179,10 @@ def _ask_openai(prompt: str, image_b64: str, mime: str, settings: Settings) -> s
             }
         ],
     }
-    if settings.ai.reasoning_effort:
-        kwargs["reasoning"] = {"effort": settings.ai.reasoning_effort}
+    if settings.ai_reasoning_effort:
+        kwargs["reasoning"] = {"effort": settings.ai_reasoning_effort}
     response = client.responses.create(**kwargs)
     return response.output_text.strip()
-
-
-def _ask_anthropic(prompt: str, image_b64: str, mime: str, settings: Settings) -> str:
-    import anthropic
-
-    if not settings.ai.anthropic_api_key:
-        raise SystemExit("anthropic_api_key is not set in config.toml ([ai] section).")
-    client = anthropic.Anthropic(api_key=settings.ai.anthropic_api_key, timeout=settings.ai.timeout_seconds)
-    message = client.messages.create(
-        model=settings.ai.model,
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": mime, "data": image_b64},
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-    )
-    return "\n".join(b.text for b in message.content if getattr(b, "type", None) == "text").strip()
 
 
 def parse_response(text: str) -> Solution:

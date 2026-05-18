@@ -7,9 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from quiz_relay.relays.base import Relay
-from quiz_relay.solution import Solution
-
-PULSE = {letter: i for i, letter in enumerate("ABCDEFGHI", 1)} | {str(i): i for i in range(1, 10)}
 
 LEDS_ROOT = Path("/sys/class/leds")
 
@@ -37,50 +34,36 @@ class KeyboardLedRelay(Relay):
             max_pulses=int(section.get("max_pulses", 9)),
         )
 
-    def _brightness_path(self) -> Path:
-        return LEDS_ROOT / self.device / "brightness"
-
-    def _max_brightness(self, path: Path) -> int:
-        try:
-            return int((path.parent / "max_brightness").read_text().strip() or "1")
-        except OSError:
-            return 1
-
-    def _write(self, path: Path, value: int) -> None:
-        path.write_text(f"{value}\n")
-
-    def send(self, solution: Solution) -> dict[str, Any]:
-        path = self._brightness_path()
+    def send(self, pulses: list[int]) -> dict[str, Any]:
+        path = LEDS_ROOT / self.device / "brightness"
         if not path.exists():
             msg = f"LED device not found: {path}"
             print(f"relay[keyboard_led] error: {msg}", file=sys.stderr, flush=True)
             return {"sent": False, "error": msg}
 
-        pulse_counts = [PULSE[a] for a in solution.all_answer_ids if a in PULSE]
-        if not pulse_counts:
-            print("relay[keyboard_led] no answers to signal", file=sys.stderr, flush=True)
-            return {"sent": False, "error": "no answers"}
+        if not pulses:
+            print("relay[keyboard_led] no pulses to send", file=sys.stderr, flush=True)
+            return {"sent": False, "error": "no pulses"}
 
-        on_value = self._max_brightness(path)
+        try:
+            max_brightness = int((path.parent / "max_brightness").read_text().strip() or "1")
+        except OSError:
+            max_brightness = 1
         on_s = self.on / 1000.0
         off_s = self.off / 1000.0
         pause_s = self.pause / 1000.0
 
-        print(
-            f"relay[keyboard_led] device={self.device} pulses={pulse_counts}",
-            file=sys.stderr,
-            flush=True,
-        )
+        print(f"relay[keyboard_led] device={self.device} pulses={pulses}", file=sys.stderr, flush=True)
         try:
-            for i, count in enumerate(pulse_counts):
+            for i, count in enumerate(pulses):
                 if i > 0:
                     time.sleep(pause_s)
                 for j in range(min(count, self.max_pulses)):
                     if j > 0:
                         time.sleep(off_s)
-                    self._write(path, on_value)
+                    path.write_text(f"{max_brightness}\n")
                     time.sleep(on_s)
-                    self._write(path, 0)
+                    path.write_text("0\n")
         except PermissionError as exc:
             msg = f"permission denied on {path} (install udev rule, see README)"
             print(f"relay[keyboard_led] error: {msg}", file=sys.stderr, flush=True)
@@ -88,4 +71,4 @@ class KeyboardLedRelay(Relay):
         except OSError as exc:
             print(f"relay[keyboard_led] error: {exc}", file=sys.stderr, flush=True)
             return {"sent": False, "error": str(exc)}
-        return {"sent": True, "pulses": pulse_counts}
+        return {"sent": True, "pulses": pulses}

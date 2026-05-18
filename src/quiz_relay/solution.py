@@ -56,3 +56,10 @@ class Solution:
     @property
     def all_answer_ids(self) -> list[str]:
         return [a for q in self.questions for a in q.answers]
+
+
+_PULSE_TABLE = {letter: i for i, letter in enumerate("ABCDEFGHI", 1)} | {str(i): i for i in range(1, 10)}
+
+
+def answers_to_pulses(answer_ids: list[str]) -> list[int]:
+    return [_PULSE_TABLE[a] for a in answer_ids if a in _PULSE_TABLE]

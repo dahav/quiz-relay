@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from quiz_relay.relays.base import Relay
-from quiz_relay.solution import Solution
-
-PULSE = {letter: i for i, letter in enumerate("ABCDEFGHI", 1)} | {str(i): i for i in range(1, 10)}
 
 
 @dataclass(frozen=True)
@@ -37,8 +34,11 @@ class HttpRelay(Relay):
             duty=int(section.get("duty", 170)),
         )
 
-    def send(self, solution: Solution) -> dict[str, Any]:
-        pulses = [str(PULSE[a]) for a in solution.all_answer_ids if a in PULSE]
+    def send(self, pulses: list[int]) -> dict[str, Any]:
+        if not pulses:
+            print("relay[http] no pulses to send", file=sys.stderr, flush=True)
+            return {"sent": False, "error": "no pulses"}
+
         params: dict[str, str] = {
             "on": str(self.on),
             "off": str(self.off),
@@ -46,9 +46,9 @@ class HttpRelay(Relay):
             "duty": str(self.duty),
         }
         if len(pulses) == 1:
-            params["n"] = pulses[0]
-        elif len(pulses) > 1:
-            params["seq"] = ",".join(pulses[:8])
+            params["n"] = str(pulses[0])
+        else:
+            params["seq"] = ",".join(str(p) for p in pulses[:8])
 
         sep = "&" if urllib.parse.urlparse(self.url).query else "?"
         full_url = f"{self.url}{sep}{urllib.parse.urlencode(params)}"

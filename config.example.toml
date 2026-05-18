@@ -2,13 +2,11 @@
 monitor = 1
 
 [ai]
-provider = "openai"          # "openai" or "anthropic"
 model = "gpt-4.1-mini"
-reasoning_effort = "minimal" # OpenAI only: "minimal", "low", "medium", "high"
+reasoning_effort = "minimal" # "minimal", "low", "medium", "high"
 timeout_seconds = 30
 response_language = "de"
-openai_api_key = ""          # required when provider = "openai"
-anthropic_api_key = ""       # required when provider = "anthropic"
+openai_api_key = ""
 
 [mouse]
 event = "middle-click"
