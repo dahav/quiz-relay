@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from quiz_relay.config import Settings
+from quiz_relay.errors import AiResponseError, ConfigError, InvalidImageError, UnknownModeError
 from quiz_relay.solution import Solution
 
 BASE_MODE = "multiplechoice"
@@ -57,17 +58,13 @@ Rules:
 
 
 def solve(settings: Settings, mode: str, image: Path | None = None) -> tuple[Solution, Path, str]:
-    load_mode(settings.prompts_dir, mode)
+    from quiz_relay.service import solve_image
+
     if image is not None:
-        if not image.is_file():
-            raise SystemExit(f"Image file not found: {image}")
-        if image.suffix.lower() not in IMAGE_MIME_TYPES:
-            supported = ", ".join(sorted(IMAGE_MIME_TYPES))
-            raise SystemExit(f"Unsupported image format '{image.suffix}'. Supported: {supported}")
         source, source_key = image, "image"
     else:
         source, source_key = capture_screenshot(settings), "screenshot"
-    return parse_response(ask_ai(source, settings, mode)), source, source_key
+    return solve_image(settings, mode, source), source, source_key
 
 
 def available_modes(prompts_dir: Path) -> list[str]:
@@ -78,14 +75,14 @@ def available_modes(prompts_dir: Path) -> list[str]:
 
 def load_mode(prompts_dir: Path, mode: str) -> str:
     if mode == BASE_MODE:
-        raise SystemExit(f"'{BASE_MODE}' is the common base and cannot be used as a mode.")
+        raise UnknownModeError(f"'{BASE_MODE}' is the common base and cannot be used as a mode.")
     path = prompts_dir / f"{mode}.md"
     if not path.is_file():
         hint = ", ".join(available_modes(prompts_dir)) or "(none)"
-        raise SystemExit(f"Unknown mode '{mode}'. Available: {hint}")
+        raise UnknownModeError(f"Unknown mode '{mode}'. Available: {hint}")
     text = path.read_text(encoding="utf-8").strip()
     if not text:
-        raise SystemExit(f"Mode file is empty: {path}")
+        raise UnknownModeError(f"Mode file is empty: {path}")
     return text
 
 
@@ -101,11 +98,11 @@ def capture_screenshot(settings: Settings) -> Path:
         monitors = sct.monitors
         idx = settings.monitor
         if idx < 1 or idx >= len(monitors):
-            raise SystemExit(f"Monitor {idx} is not available.")
+            raise InvalidImageError(f"Monitor {idx} is not available.")
         shot = sct.grab(monitors[idx])
         sample = bytes(shot.rgb)[:: max(1, len(shot.rgb) // 5000)]
         if max(sample) - min(sample) < 10:
-            raise SystemExit(
+            raise InvalidImageError(
                 "Screenshot appears empty (near-uniform color). "
                 "On Wayland, mss often returns a black image. Switch to an X11 session."
             )
@@ -129,7 +126,7 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     from openai import OpenAI
 
     if not settings.openai_api_key:
-        raise SystemExit("openai_api_key is not set in config.toml ([ai] section).")
+        raise ConfigError("openai_api_key is not set in config.toml ([ai] section).")
     prompt = build_prompt(settings, mode)
     image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     mime = IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/png")
@@ -168,10 +165,10 @@ def parse_response(text: str) -> Solution:
     except json.JSONDecodeError:
         start, end = stripped.find("{"), stripped.rfind("}")
         if start == -1 or end < start:
-            raise SystemExit("AI response does not contain a JSON object.")
+            raise AiResponseError("AI response does not contain a JSON object.")
         data = json.loads(stripped[start : end + 1])
     if not isinstance(data, dict) or not isinstance(data.get("answers"), list):
-        raise SystemExit("AI response missing answers array.")
+        raise AiResponseError("AI response missing answers array.")
     if not data["answers"]:
-        raise SystemExit(f"AI found no question: {data.get('explanation') or 'no question visible'}")
+        raise AiResponseError(f"AI found no question: {data.get('explanation') or 'no question visible'}")
     return Solution(raw=data)

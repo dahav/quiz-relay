@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "Local screenshot quiz solver with AI analysis and HTTP relay"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi",
     "mss",
     "openai",
     "pynput",
+    "uvicorn[standard]",
 ]
 
 [project.scripts]

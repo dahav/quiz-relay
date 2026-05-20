@@ -8,6 +8,7 @@ from typing import Any
 
 from quiz_relay.config import Settings, load_settings
 from quiz_relay.core import available_modes, load_mode, solve
+from quiz_relay.errors import QuizRelayError
 from quiz_relay.mouse import SUPPORTED_EVENTS, MouseEvent, listen_for_mouse_event
 from quiz_relay.relays import available_relays, build_relay
 from quiz_relay.relays.keyboard_led import scan_keyboard_leds
@@ -107,18 +108,22 @@ def _run_once(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "solve":
-        return _cmd_solve(args)
-    if args.command == "listen":
-        return _cmd_listen(args)
-    if args.command == "modes":
-        return _cmd_modes(args)
-    if args.command == "relays":
-        return _cmd_relays()
-    if args.command == "scan-leds":
-        return _cmd_scan_leds()
-    if args.command == "relay-test":
-        return _cmd_relay_test(args)
+    try:
+        if args.command == "solve":
+            return _cmd_solve(args)
+        if args.command == "listen":
+            return _cmd_listen(args)
+        if args.command == "modes":
+            return _cmd_modes(args)
+        if args.command == "relays":
+            return _cmd_relays()
+        if args.command == "scan-leds":
+            return _cmd_scan_leds()
+        if args.command == "relay-test":
+            return _cmd_relay_test(args)
+    except QuizRelayError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     return 1
 
 

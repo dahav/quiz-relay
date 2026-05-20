@@ -33,6 +33,59 @@ cp config.example.toml config.toml
 
 `--mode` is required. `--relay` is optional and may be repeated.
 
+
+## Web API
+
+Run the API locally with:
+
+```bash
+.venv/bin/uvicorn quiz_relay.web:app --host 127.0.0.1 --port 8000
+```
+
+Configure `[api].keys` in `config.toml`; clients must send one value as `X-API-Key`. Uploads are raw image bodies and are retained in `[api].upload_dir`:
+
+```bash
+curl -X POST \
+  -H "X-API-Key: change-me" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @question.jpg \
+  http://127.0.0.1:8000/solve/istqb
+```
+
+Optional relays can be triggered with repeated query parameters, for example `/solve/istqb?relay=http&relay=keyboard_led`. The response includes `solution`, `answer_ids`, `pulses`, the retained `image` path, and optional `relays` results.
+
+### VPS deployment behind nginx
+
+Install the app under `/opt/quiz-relay`, create `.venv`, run `make setup`, and keep `config.toml` there with `[ai]` and `[api]` configured. Start uvicorn through systemd on localhost only:
+
+```ini
+[Service]
+WorkingDirectory=/opt/quiz-relay
+ExecStart=/opt/quiz-relay/.venv/bin/uvicorn quiz_relay.web:app --host 127.0.0.1 --port 8000
+Restart=always
+User=www-data
+Group=www-data
+```
+
+Proxy nginx to uvicorn and align the body limit with `[api].max_upload_bytes`:
+
+```nginx
+server {
+    server_name quiz.example.com;
+    client_max_body_size 10M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Use Certbot for TLS and add nginx or firewall rate limits because each public request may call the OpenAI API.
+
 ## Modes
 
 A mode is a markdown file in `prompts/<name>.md` containing domain rules

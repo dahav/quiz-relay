@@ -8,6 +8,11 @@ timeout_seconds = 30
 response_language = "de"
 openai_api_key = ""
 
+[api]
+keys = ["change-me", "rotate-me"]
+upload_dir = "runtime/uploads"
+max_upload_bytes = 10485760
+
 [mouse]
 event = "middle-click"
 
