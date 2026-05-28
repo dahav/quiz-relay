@@ -1,10 +1,13 @@
 PATH := /usr/bin:/bin:$(PATH)
 
-.PHONY: setup clean
+.PHONY: setup dev-server clean
 
 setup:
 	python3 -m venv .venv
 	.venv/bin/python -m pip install -e .
+
+dev-server:
+	.venv/bin/uvicorn quiz_relay.web:app --reload --host 0.0.0.0 --port 8001
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +

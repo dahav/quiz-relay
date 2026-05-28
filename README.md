@@ -1,10 +1,22 @@
 # Quiz Relay
 
-Local CLI that screenshots, asks an AI for the answer, and optionally pings a vibration endpoint.
+Local CLI and FastAPI service that screenshots or accepts uploaded quiz images, asks an AI for the answer, and optionally dispatches relay signals.
 
 ```
-trigger -> screenshot -> AI (per mode) -> Solution -> relay module(s)
+CLI/API -> screenshot or upload -> AI (per mode) -> Solution -> relay module(s)
 ```
+
+## Architecture
+
+Transport wrappers are intentionally thin:
+
+- `src/quiz_relay/cli.py`: parses command-line arguments, loads config, calls app use-cases, and prints results.
+- `src/quiz_relay/web.py`: exposes FastAPI routes, checks API keys, stores uploads, maps application errors to HTTP responses, and returns JSON.
+- `src/quiz_relay/app.py`: orchestrates solve and relay-test use-cases shared by CLI and API.
+- `src/quiz_relay/service.py`: validates images, calls the AI/parser path, builds solution payloads, and dispatches relays.
+- `src/quiz_relay/core.py`: owns prompt loading, screenshot capture, OpenAI calls, and response parsing.
+- `src/quiz_relay/debug.py`: centralizes debug output for CLI stdout and dev-server stderr.
+- `src/quiz_relay/uploads.py`: validates and retains raw API image uploads.
 
 ## Setup
 
@@ -36,11 +48,13 @@ cp config.example.toml config.toml
 
 ## Web API
 
-Run the API locally with:
+The API is a FastAPI app served by `uvicorn`. For local development, run it directly from the virtualenv; nginx is only needed for VPS deployment:
 
 ```bash
-.venv/bin/uvicorn quiz_relay.web:app --host 127.0.0.1 --port 8000
+.venv/bin/uvicorn quiz_relay.web:app --reload --host 127.0.0.1 --port 8000
 ```
+
+Open the interactive API docs at `http://127.0.0.1:8000/docs`.
 
 Configure `[api].keys` in `config.toml`; clients must send one value as `X-API-Key`. Uploads are raw image bodies and are retained in `[api].upload_dir`:
 
@@ -52,7 +66,24 @@ curl -X POST \
   http://127.0.0.1:8000/solve/istqb
 ```
 
-Optional relays can be triggered with repeated query parameters, for example `/solve/istqb?relay=http&relay=keyboard_led`. The response includes `solution`, `answer_ids`, `pulses`, the retained `image` path, and optional `relays` results.
+Optional relays can be triggered with repeated query parameters, for example `/solve/istqb?relay=http&relay=keyboard_led`. The response includes `solution`, `answer_ids`, `pulses`, the retained `image` path, and optional `relays` results. During local development, the uvicorn process also prints the same solve debug stream used by CLI `solve`: the `calling AI...` line, relay dispatch lines, and the final JSON report. The same debug stream is appended to `runtime/quiz-relay.log` by default; override it with `QUIZ_RELAY_DEBUG_LOG=/path/to/log`.
+
+Smoke-test the API without calling OpenAI:
+
+```bash
+curl http://127.0.0.1:8000/health
+
+curl -H "X-API-Key: change-me" \
+  http://127.0.0.1:8000/modes
+
+curl -X POST \
+  -H "X-API-Key: change-me" \
+  -H "Content-Type: text/plain" \
+  --data-binary "x" \
+  http://127.0.0.1:8000/solve/istqb
+```
+
+The last command should return HTTP 400 because `text/plain` is not an allowed image type; it verifies routing, auth, and validation without using the OpenAI API.
 
 ### VPS deployment behind nginx
 

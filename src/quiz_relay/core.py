@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
 from quiz_relay.config import Settings
+from quiz_relay.debug import DebugSink
 from quiz_relay.errors import AiResponseError, ConfigError, InvalidImageError, UnknownModeError
 from quiz_relay.solution import Solution
 
@@ -122,9 +122,16 @@ def build_prompt(settings: Settings, mode: str) -> str:
     return "\n".join(sections) + "\n"
 
 
-def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
-    from openai import OpenAI
+def ask_ai(
+    image_path: Path,
+    settings: Settings,
+    mode: str,
+    *,
+    debug: DebugSink | None = None,
+) -> str:
+    from openai import OpenAI, OpenAIError
 
+    debug = debug or DebugSink()
     if not settings.openai_api_key:
         raise ConfigError("openai_api_key is not set in config.toml ([ai] section).")
     prompt = build_prompt(settings, mode)
@@ -134,7 +141,7 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     if settings.ai_reasoning_effort:
         parts.append(f"effort={settings.ai_reasoning_effort}")
     parts.append(f"image={image_path}")
-    print(f"calling AI... ({', '.join(parts)})", file=sys.stderr, flush=True)
+    debug.line(f"calling AI... ({', '.join(parts)})")
 
     client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_timeout_seconds)
     kwargs: dict = {
@@ -151,7 +158,27 @@ def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     }
     if settings.ai_reasoning_effort:
         kwargs["reasoning"] = {"effort": settings.ai_reasoning_effort}
-    return client.responses.create(**kwargs).output_text.strip()
+    try:
+        response = client.responses.create(**kwargs)
+    except OpenAIError as exc:
+        raise AiResponseError(f"OpenAI request failed: {_openai_error_message(exc)}") from exc
+
+    text = response.output_text.strip()
+    if not text:
+        raise AiResponseError("OpenAI response was empty.")
+    return text
+
+
+def _openai_error_message(exc: Exception) -> str:
+    status_code = getattr(exc, "status_code", None)
+    request_id = getattr(exc, "request_id", None)
+    parts: list[str] = []
+    if status_code:
+        parts.append(f"status={status_code}")
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    parts.append(str(exc))
+    return " ".join(parts)
 
 
 def _strip_json_fence(text: str) -> str:
