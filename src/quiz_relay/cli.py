@@ -8,7 +8,6 @@ from pathlib import Path
 from quiz_relay.app import run_relay_test, run_solve, validate_mode
 from quiz_relay.config import load_settings
 from quiz_relay.core import available_modes
-from quiz_relay.debug import DebugSink
 from quiz_relay.errors import QuizRelayError
 from quiz_relay.mouse import SUPPORTED_EVENTS, listen_for_mouse_event
 from quiz_relay.relays import available_relays
@@ -92,13 +91,7 @@ def _cmd_solve(args: argparse.Namespace) -> int:
     settings = load_settings(_config_path(args))
     mode = _require_mode(args)
     image = Path(args.image).expanduser() if args.image else None
-    report = run_solve(
-        settings,
-        mode,
-        args.relay,
-        image=image,
-        debug=DebugSink(enabled=True, stream=sys.stdout),
-    )
+    report = run_solve(settings, mode, args.relay, image=image)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
@@ -120,16 +113,9 @@ def _cmd_listen(args: argparse.Namespace) -> int:
     validate_mode(settings, mode)
     event_name = args.event or settings.mouse_event
     relay_names: list[str] = args.relay
-    debug = DebugSink(enabled=True, stream=sys.stdout)
 
     def on_event(event) -> None:
-        report = run_solve(
-            settings,
-            mode,
-            relay_names,
-            event_name=event.name,
-            debug=debug,
-        )
+        report = run_solve(settings, mode, relay_names, event_name=event.name)
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 
     relay_hint = ",".join(relay_names) if relay_names else "(none)"
@@ -196,11 +182,7 @@ def _cmd_relay_test(args: argparse.Namespace) -> int:
     if not args.relay:
         raise SystemExit("--relay is required (e.g. --relay http or --relay keyboard_led).")
     settings = load_settings(_config_path(args))
-    report, exit_code = run_relay_test(
-        settings,
-        args.relay,
-        debug=DebugSink(enabled=True, stream=sys.stdout),
-    )
+    report, exit_code = run_relay_test(settings, args.relay)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return exit_code
 

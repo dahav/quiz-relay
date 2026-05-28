@@ -2,9 +2,9 @@
 monitor = 1
 
 [ai]
-model = "gpt-5.4-nano"
+model = "gpt-4.1-mini"
 reasoning_effort = "minimal" # "minimal", "low", "medium", "high"
-timeout_seconds = 120
+timeout_seconds = 30
 response_language = "de"
 openai_api_key = ""
 

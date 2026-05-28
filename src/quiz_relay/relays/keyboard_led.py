@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,12 +124,9 @@ class KeyboardLedRelay(Relay):
     def send(self, pulses: list[int]) -> dict[str, Any]:
         path, device, error = self._resolve_brightness_path()
         if path is None or device is None:
-            msg = error or "LED device not found"
-            print(f"relay[keyboard_led] error: {msg}", file=sys.stderr, flush=True)
-            return {"sent": False, "error": msg}
+            return {"sent": False, "error": error or "LED device not found"}
 
         if not pulses:
-            print("relay[keyboard_led] no pulses to send", file=sys.stderr, flush=True)
             return {"sent": False, "error": "no pulses"}
 
         try:
@@ -141,7 +137,6 @@ class KeyboardLedRelay(Relay):
         off_s = self.off / 1000.0
         pause_s = self.pause / 1000.0
 
-        print(f"relay[keyboard_led] device={device} pulses={pulses}", file=sys.stderr, flush=True)
         try:
             for i, count in enumerate(pulses):
                 if i > 0:
@@ -154,9 +149,7 @@ class KeyboardLedRelay(Relay):
                     path.write_text("0\n")
         except PermissionError as exc:
             msg = f"permission denied on {path} (install udev rule, see README)"
-            print(f"relay[keyboard_led] error: {msg}", file=sys.stderr, flush=True)
             return {"sent": False, "error": msg, "detail": str(exc)}
         except OSError as exc:
-            print(f"relay[keyboard_led] error: {exc}", file=sys.stderr, flush=True)
             return {"sent": False, "error": str(exc)}
         return {"sent": True, "pulses": pulses, "device": device}

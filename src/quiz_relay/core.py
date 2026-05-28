@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 from quiz_relay.config import Settings
-from quiz_relay.debug import DebugSink
 from quiz_relay.errors import AiResponseError, ConfigError, InvalidImageError, UnknownModeError
 from quiz_relay.solution import Solution
 
@@ -55,16 +54,6 @@ Rules:
 - If no multiple-choice question is visible, return an empty answers array with explanation "no question visible". Do not invent a question.
 - Do not return Markdown code fences.
 """
-
-
-def solve(settings: Settings, mode: str, image: Path | None = None) -> tuple[Solution, Path, str]:
-    from quiz_relay.service import solve_image
-
-    if image is not None:
-        source, source_key = image, "image"
-    else:
-        source, source_key = capture_screenshot(settings), "screenshot"
-    return solve_image(settings, mode, source), source, source_key
 
 
 def available_modes(prompts_dir: Path) -> list[str]:
@@ -122,27 +111,14 @@ def build_prompt(settings: Settings, mode: str) -> str:
     return "\n".join(sections) + "\n"
 
 
-def ask_ai(
-    image_path: Path,
-    settings: Settings,
-    mode: str,
-    *,
-    debug: DebugSink | None = None,
-) -> str:
+def ask_ai(image_path: Path, settings: Settings, mode: str) -> str:
     from openai import OpenAI, OpenAIError
 
-    debug = debug or DebugSink()
     if not settings.openai_api_key:
         raise ConfigError("openai_api_key is not set in config.toml ([ai] section).")
     prompt = build_prompt(settings, mode)
     image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
     mime = IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/png")
-    parts = [f"model={settings.ai_model}", f"mode={mode}"]
-    if settings.ai_reasoning_effort:
-        parts.append(f"effort={settings.ai_reasoning_effort}")
-    parts.append(f"image={image_path}")
-    debug.line(f"calling AI... ({', '.join(parts)})")
-
     client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_timeout_seconds)
     kwargs: dict = {
         "model": settings.ai_model,

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This Python 3.11 package uses a `src/` layout. Application code lives in `src/quiz_relay/`: `cli.py` and `web.py` are thin transport wrappers, `app.py` orchestrates shared use-cases, `service.py` holds shared image-solving and relay behavior, `core.py` handles prompts/OpenAI/parsing, `uploads.py` retains API uploads, `debug.py` centralizes debug output, `config.py` loads TOML, and `errors.py` defines expected errors plus HTTP status mapping. Relays live in `src/quiz_relay/relays/`; add modules there and register them in `relays/__init__.py`. Prompt modes are Markdown files in `prompts/`; `multiplechoice.md` is shared base guidance. Runtime screenshots and uploads are written under `runtime/`.
+This Python 3.11 package uses a `src/` layout. Application code lives in `src/quiz_relay/`: `cli.py` and `web.py` are thin transport wrappers, `app.py` orchestrates shared use-cases, `service.py` holds shared image-solving and relay behavior, `core.py` handles prompts/OpenAI/parsing, `uploads.py` retains API uploads, `config.py` loads TOML, and `errors.py` defines expected errors plus HTTP status mapping. Relays live in `src/quiz_relay/relays/`; add modules there and register them in `relays/__init__.py`. Prompt modes are Markdown files in `prompts/`; `multiplechoice.md` is shared base guidance. Runtime screenshots and uploads are written under `runtime/`.
 
 ## Build, Test, and Development Commands
 
@@ -16,7 +16,7 @@ This Python 3.11 package uses a `src/` layout. Application code lives in `src/qu
 
 ## Coding Style & Naming Conventions
 
-Use standard Python style with 4-space indentation, type annotations for public functions, and small modules. Keep transport concerns in `cli.py` or `web.py`; shared orchestration belongs in `app.py`, domain helpers in `service.py`, uploads in `uploads.py`, and debug output in `debug.py`. Relay names use snake case such as `keyboard_led`, prompt modes use lowercase file stems such as `istqb.md`, and CLI subcommands use kebab case. Keep mode files focused on domain rules; do not override the JSON schema in prompts.
+Use standard Python style with 4-space indentation, type annotations for public functions, and small modules. Keep transport concerns in `cli.py` or `web.py`; shared orchestration belongs in `app.py`, domain helpers in `service.py`, and uploads in `uploads.py`. Relay names use snake case such as `keyboard_led`, prompt modes use lowercase file stems such as `istqb.md`, and CLI subcommands use kebab case. Keep mode files focused on domain rules; do not override the JSON schema in prompts.
 
 ## Testing Guidelines
 

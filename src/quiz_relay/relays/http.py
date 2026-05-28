@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -36,7 +35,6 @@ class HttpRelay(Relay):
 
     def send(self, pulses: list[int]) -> dict[str, Any]:
         if not pulses:
-            print("relay[http] no pulses to send", file=sys.stderr, flush=True)
             return {"sent": False, "error": "no pulses"}
 
         params: dict[str, str] = {
@@ -49,11 +47,8 @@ class HttpRelay(Relay):
 
         sep = "&" if urllib.parse.urlparse(self.url).query else "?"
         full_url = f"{self.url}{sep}{urllib.parse.urlencode(params)}"
-        print(f"relay[http] GET {full_url}", file=sys.stderr, flush=True)
         try:
             with urllib.request.urlopen(full_url, timeout=self.timeout_seconds) as response:
-                print(f"relay[http] <- {response.status}", file=sys.stderr, flush=True)
                 return {"sent": 200 <= response.status < 300, "status": response.status}
         except Exception as exc:
-            print(f"relay[http] error: {exc}", file=sys.stderr, flush=True)
             return {"sent": False, "error": str(exc)}

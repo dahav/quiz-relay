@@ -15,7 +15,6 @@ Transport wrappers are intentionally thin:
 - `src/quiz_relay/app.py`: orchestrates solve and relay-test use-cases shared by CLI and API.
 - `src/quiz_relay/service.py`: validates images, calls the AI/parser path, builds solution payloads, and dispatches relays.
 - `src/quiz_relay/core.py`: owns prompt loading, screenshot capture, OpenAI calls, and response parsing.
-- `src/quiz_relay/debug.py`: centralizes debug output for CLI stdout and dev-server stderr.
 - `src/quiz_relay/uploads.py`: validates and retains raw API image uploads.
 
 ## Setup
@@ -66,7 +65,7 @@ curl -X POST \
   http://127.0.0.1:8000/solve/istqb
 ```
 
-Optional relays can be triggered with repeated query parameters, for example `/solve/istqb?relay=http&relay=keyboard_led`. The response includes `solution`, `answer_ids`, `pulses`, the retained `image` path, and optional `relays` results. During local development, the uvicorn process also prints the same solve debug stream used by CLI `solve`: the `calling AI...` line, relay dispatch lines, and the final JSON report. The same debug stream is appended to `runtime/quiz-relay.log` by default; override it with `QUIZ_RELAY_DEBUG_LOG=/path/to/log`.
+Optional relays can be triggered with repeated query parameters, for example `/solve/istqb?relay=http&relay=keyboard_led`. The response includes `solution`, `answer_ids`, `pulses`, the retained `image` path, and optional `relays` results.
 
 Smoke-test the API without calling OpenAI:
 

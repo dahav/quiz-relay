@@ -4,7 +4,6 @@ import os
 import platform
 import sys
 import threading
-import traceback
 from dataclasses import dataclass
 from typing import Callable
 
@@ -59,9 +58,8 @@ def listen_for_mouse_event(event_name: str, callback: Callable[[MouseEvent], Non
             callback(event)
         except SystemExit as exc:
             print(f"run failed: {exc}", file=sys.stderr, flush=True)
-        except Exception:
-            print("run failed:", file=sys.stderr, flush=True)
-            traceback.print_exc()
+        except Exception as exc:
+            print(f"run failed: {exc}", file=sys.stderr, flush=True)
         finally:
             lock.release()
 
