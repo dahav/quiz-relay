@@ -86,35 +86,159 @@ The last command should return HTTP 400 because `text/plain` is not an allowed i
 
 ### VPS deployment behind nginx
 
-Install the app under `/opt/quiz-relay`, create `.venv`, run `make setup`, and keep `config.toml` there with `[ai]` and `[api]` configured. Start uvicorn through systemd on localhost only:
+On a headless VPS the screenshot and `keyboard_led` relays do not work (no
+display, no LED). Use the upload path (`POST /solve/<mode>` with an image body)
+and optionally the `http` relay.
+
+#### 1. Get the code onto the VPS
+
+```bash
+sudo mkdir -p /opt/quiz-relay
+sudo chown "$USER:$USER" /opt/quiz-relay
+git clone <your-repo> /opt/quiz-relay   # or rsync/scp
+cd /opt/quiz-relay
+```
+
+#### 2. Build the virtualenv on the server
+
+Build `.venv` **on the VPS**, never copy it from another machine. The venv
+shebangs and the editable install are pinned to their build path, so a copied
+`.venv` breaks with `bad interpreter` / `No module named 'quiz_relay'`.
+
+```bash
+sudo apt install -y python3-venv python3-pip
+make setup
+```
+
+#### 3. Configure
+
+```bash
+cp config.example.toml config.toml
+```
+
+- Set `[ai].openai_api_key` (never commit it).
+- Replace `[api].keys` with a long random value:
+  ```bash
+  python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+  ```
+- Keep `[api].max_upload_bytes` aligned with the nginx `client_max_body_size`.
+
+#### 4. systemd service (uvicorn on localhost only)
+
+`/etc/systemd/system/quiz-relay.service`:
 
 ```ini
+[Unit]
+Description=Quiz Relay API
+After=network.target
+
 [Service]
 WorkingDirectory=/opt/quiz-relay
+Environment=QUIZ_RELAY_CONFIG=/opt/quiz-relay/config.toml
 ExecStart=/opt/quiz-relay/.venv/bin/uvicorn quiz_relay.web:app --host 127.0.0.1 --port 8000
 Restart=always
 User=www-data
 Group=www-data
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-Proxy nginx to uvicorn and align the body limit with `[api].max_upload_bytes`:
+The service user must be able to write `runtime/uploads`:
+
+```bash
+sudo chown -R www-data:www-data /opt/quiz-relay
+sudo systemctl daemon-reload
+sudo systemctl enable --now quiz-relay
+sudo systemctl status quiz-relay
+```
+
+The service is independent of nginx; uvicorn only listens on `127.0.0.1:8000`
+and nginx terminates TLS in front of it.
+
+#### 5. Rate-limit zone (once)
+
+Each public request may call the OpenAI API, so rate-limit it. Add inside the
+`http { ... }` block of `/etc/nginx/nginx.conf`:
+
+```nginx
+limit_req_zone $binary_remote_addr zone=quiz:10m rate=10r/m;
+```
+
+#### 6a. nginx — own subdomain (recommended)
+
+A dedicated `server` block keeps logs, TLS, and `/docs` clean:
 
 ```nginx
 server {
     server_name quiz.example.com;
-    client_max_body_size 10M;
+    client_max_body_size 10M;          # = [api].max_upload_bytes
 
     location / {
+        limit_req zone=quiz burst=5 nodelay;
         proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 130s;        # > [ai].timeout_seconds
     }
 }
 ```
 
-Use Certbot for TLS and add nginx or firewall rate limits because each public request may call the OpenAI API.
+Then issue a certificate:
+
+```bash
+sudo certbot --nginx -d quiz.example.com
+```
+
+#### 6b. nginx — sub-path on an existing domain
+
+To avoid a new subdomain, add a `location` to an existing TLS `server` block,
+**before** its `location /`. The trailing slash on `proxy_pass` strips the
+`/quiz` prefix so FastAPI still sees `/health`, `/modes`, `/solve/...`:
+
+```nginx
+    location /quiz/ {
+        limit_req zone=quiz burst=5 nodelay;
+        client_max_body_size 10M;       # overrides a smaller server-level limit
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 130s;
+    }
+```
+
+Note: `/quiz/docs` (Swagger UI) may fail to load its assets under a sub-path
+because of absolute URLs. For pure API use this does not matter; if you need the
+docs, prefer the subdomain in 6a.
+
+#### 7. Apply and test
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+
+curl https://quiz.example.com/health
+curl -H "X-API-Key: <key>" https://quiz.example.com/modes
+curl -X POST -H "X-API-Key: <key>" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @question.jpg \
+  https://quiz.example.com/solve/istqb
+```
+
+For the sub-path variant the URLs are `https://example.com/quiz/health`, etc.
+
+#### Security checklist
+
+- Never commit `config.toml` with a real OpenAI key or `[api].keys`.
+- Firewall: expose only 80/443; keep port 8000 bound to `127.0.0.1`.
+- Keep the rate limit enabled (every call costs OpenAI tokens).
+- `runtime/uploads` retains uploaded images; prune it periodically as it may be
+  sensitive.
 
 ## Modes
 
