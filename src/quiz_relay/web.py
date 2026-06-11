@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import sys
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 
 from quiz_relay.app import run_solve
 from quiz_relay.config import Settings, load_settings
 from quiz_relay.core import available_modes
 from quiz_relay.errors import QuizRelayError, error_status
-from quiz_relay.runtime_log import log_event, web_log_path
+from quiz_relay.runtime_log import WEB_LOG, log_event, web_log_path
 from quiz_relay.uploads import save_upload
 
 app = FastAPI(title="Quiz Relay API")
@@ -23,12 +24,46 @@ async def log_request(request: Request, call_next):
     client = request.client
     client_addr = f"{client.host}:{client.port}" if client else "unknown"
     print(f"request received from {client_addr}: {request.method} {request.url.path}", file=sys.stderr, flush=True)
-    return await call_next(request)
+
+    response = await call_next(request)
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    log_event(
+        "web.response",
+        {
+            "client": client_addr,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "response": _logged_response_body(body),
+        },
+        path=_web_log_path(),
+    )
+    return Response(
+        content=body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+    )
 
 
 def _settings() -> Settings:
     config = os.environ.get("QUIZ_RELAY_CONFIG")
     return load_settings(Path(config).expanduser() if config else None)
+
+
+def _web_log_path() -> Path:
+    try:
+        return web_log_path(_settings().api_upload_dir)
+    except QuizRelayError:
+        return WEB_LOG
+
+
+def _logged_response_body(body: bytes) -> Any:
+    text = body.decode("utf-8", errors="replace")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
 
 
 def _settings_for_request() -> Settings:
@@ -71,31 +106,8 @@ async def solve(
     _require_api_key(settings, x_api_key)
 
     normalized_content_type = (content_type or "").split(";", 1)[0].strip()
-    relay_names = relay or []
     try:
         image_path = save_upload(settings, mode, normalized_content_type, await request.body())
-        response = run_solve(settings, mode, relay_names, image=image_path)
-        log_event(
-            "web.solve.response",
-            {
-                "mode": mode,
-                "relays": relay_names,
-                "response": response,
-            },
-            path=web_log_path(settings.api_upload_dir),
-        )
-        return response
+        return run_solve(settings, mode, relay or [], image=image_path)
     except QuizRelayError as exc:
-        status = error_status(exc)
-        log_event(
-            "web.solve.error",
-            {
-                "mode": mode,
-                "relays": relay_names,
-                "status": status,
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-            },
-            path=web_log_path(settings.api_upload_dir),
-        )
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
+        raise HTTPException(status_code=error_status(exc), detail=str(exc)) from exc
