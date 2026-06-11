@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -14,6 +15,14 @@ from quiz_relay.errors import QuizRelayError, error_status
 from quiz_relay.uploads import save_upload
 
 app = FastAPI(title="Quiz Relay API")
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    client = request.client
+    client_addr = f"{client.host}:{client.port}" if client else "unknown"
+    print(f"request received from {client_addr}: {request.method} {request.url.path}", file=sys.stderr, flush=True)
+    return await call_next(request)
 
 
 def _settings() -> Settings:
