@@ -12,7 +12,7 @@ from quiz_relay.app import run_solve
 from quiz_relay.config import Settings, load_settings
 from quiz_relay.core import available_modes
 from quiz_relay.errors import QuizRelayError, error_status
-from quiz_relay.runtime_log import log_event
+from quiz_relay.runtime_log import log_event, web_log_path
 from quiz_relay.uploads import save_upload
 
 app = FastAPI(title="Quiz Relay API")
@@ -71,9 +71,9 @@ async def solve(
     _require_api_key(settings, x_api_key)
 
     normalized_content_type = (content_type or "").split(";", 1)[0].strip()
+    relay_names = relay or []
     try:
         image_path = save_upload(settings, mode, normalized_content_type, await request.body())
-        relay_names = relay or []
         response = run_solve(settings, mode, relay_names, image=image_path)
         log_event(
             "web.solve.response",
@@ -82,7 +82,20 @@ async def solve(
                 "relays": relay_names,
                 "response": response,
             },
+            path=web_log_path(settings.api_upload_dir),
         )
         return response
     except QuizRelayError as exc:
-        raise HTTPException(status_code=error_status(exc), detail=str(exc)) from exc
+        status = error_status(exc)
+        log_event(
+            "web.solve.error",
+            {
+                "mode": mode,
+                "relays": relay_names,
+                "status": status,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+            path=web_log_path(settings.api_upload_dir),
+        )
+        raise HTTPException(status_code=status, detail=str(exc)) from exc

@@ -10,6 +10,10 @@ LOG_DIR = Path("runtime/logs")
 WEB_LOG = LOG_DIR / "web.jsonl"
 
 
+def web_log_path(upload_dir: Path) -> Path:
+    return upload_dir.parent / "logs" / "web.jsonl"
+
+
 def log_event(event: str, payload: dict[str, Any], path: Path = WEB_LOG) -> None:
     record = {
         "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
